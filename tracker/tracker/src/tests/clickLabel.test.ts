@@ -182,6 +182,7 @@ describe('getCSSPath data attributes', () => {
       '<div><button data-v-7ba5bd90="">Save</button><button data-v-7ba5bd90="" data-action="cancel">Cancel</button></div>'
     const [save, cancel] = Array.from(document.querySelectorAll('button'))
     expect(getCSSPath(cancel)).toBe('[data-action="cancel"]')
-    expect(getCSSPath(save)).not.toBe('[data-v-7ba5bd90=""]')
+    const saveMatches = document.querySelectorAll(getCSSPath(save) as string)
+    expect(Array.from(saveMatches)).toEqual([save])
   })
 })

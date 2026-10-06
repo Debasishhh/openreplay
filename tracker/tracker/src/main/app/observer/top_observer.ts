@@ -99,6 +99,25 @@ export interface Options {
   disableThrottling?: boolean
 }
 
+/** Send resolved used color-scheme ('dark'|'light'|'normal') for the player to force on replay. */
+export function sendColorScheme(app: App): void {
+  if (!IN_BROWSER) return
+  const root = document.documentElement
+  let declared = getComputedStyle(root).colorScheme
+  if (!declared || declared === 'normal') {
+    const meta = document.querySelector('meta[name="color-scheme" i]')
+    const content = meta && meta.getAttribute('content')
+    if (content) declared = content
+  }
+  let used = 'normal'
+  if (declared && declared !== 'normal') {
+    const prefersDark = !!window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+    // resolve declared support against OS preference into the concrete used scheme
+    used = declared.includes('dark') && (prefersDark || !declared.includes('light')) ? 'dark' : 'light'
+  }
+  app.send(SetNodeAttribute(0, '__openreplay_color_scheme', used))
+}
+
 type Context = Window & typeof globalThis
 type ContextCallback = (context: Context) => void
 
@@ -252,7 +271,7 @@ export default class TopObserver extends Observer {
     )
 
     // Send before `orloaded` so it lands in the initial visual batch (see sendColorScheme).
-    this.sendColorScheme()
+    sendColorScheme(this.app)
 
     // "DOM parsed" signal: observeRoot sent the full initial tree synchronously above.
     // The worker keys on this attribute (BatchWriter) to finalize the visual batch.
@@ -260,7 +279,7 @@ export default class TopObserver extends Observer {
 
     if (IN_BROWSER && window.matchMedia) {
       this.colorSchemeMQL = window.matchMedia('(prefers-color-scheme: dark)')
-      this.colorSchemeListener = this.app.safe(() => this.sendColorScheme())
+      this.colorSchemeListener = this.app.safe(() => sendColorScheme(this.app))
       this.colorSchemeMQL.addEventListener?.('change', this.colorSchemeListener)
     }
   }
@@ -268,24 +287,6 @@ export default class TopObserver extends Observer {
   private colorSchemeMQL: MediaQueryList | null = null
   private colorSchemeListener: ((e: MediaQueryListEvent) => void) | null = null
 
-  /** Send resolved used color-scheme ('dark'|'light'|'normal') for the player to force on replay. */
-  private sendColorScheme(): void {
-    if (!IN_BROWSER) return
-    const root = document.documentElement
-    let declared = getComputedStyle(root).colorScheme
-    if (!declared || declared === 'normal') {
-      const meta = document.querySelector('meta[name="color-scheme" i]')
-      const content = meta && meta.getAttribute('content')
-      if (content) declared = content
-    }
-    let used = 'normal'
-    if (declared && declared !== 'normal') {
-      const prefersDark = !!window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-      // resolve declared support against OS preference into the concrete used scheme
-      used = declared.includes('dark') && (prefersDark || !declared.includes('light')) ? 'dark' : 'light'
-    }
-    this.app.send(SetNodeAttribute(0, '__openreplay_color_scheme', used))
-  }
 
   crossdomainObserve(rootNodeId: number, frameOder: number, frameLevel: number) {
     initUntaintedDom()

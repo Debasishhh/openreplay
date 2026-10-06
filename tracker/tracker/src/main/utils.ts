@@ -343,9 +343,23 @@ export function deleteEventListener(
 class FIFOTaskScheduler {
   taskQueue: any[]
   isRunning: boolean
+  /** the step waiting for an animation frame, if any */
+  private pendingStep: (() => void) | null = null
+  private watchingVisibility = false
   constructor() {
     this.taskQueue = []
     this.isRunning = false
+  }
+
+  // rAF never fires in a background tab: a step already waiting for one when the tab
+  // gets hidden would hold the queue (and every commit) until it is shown again
+  private watchVisibility() {
+    if (this.watchingVisibility || typeof document === 'undefined') return
+    this.watchingVisibility = true
+    document.addEventListener('visibilitychange', () => {
+      const step = this.pendingStep
+      if (document.hidden && step) setTimeout(step, 0)
+    })
   }
 
   // Adds a task to the queue
@@ -374,11 +388,19 @@ class FIFOTaskScheduler {
       // silently ends the recording. See #4836.
       const { task, onError } = this.taskQueue.shift()
       const scheduleNext = () => {
-        // rAF never fires in a background tab: the queue (and every commit) would wait there
+        let done = false
+        const step = () => {
+          if (done) return
+          done = true
+          if (this.pendingStep === step) this.pendingStep = null
+          executeNextTask(false)
+        }
         if (typeof document !== 'undefined' && document.hidden) {
-          setTimeout(() => executeNextTask(false), 0)
+          setTimeout(step, 0)
         } else {
-          requestAnimationFrame(() => executeNextTask(false))
+          this.pendingStep = step
+          this.watchVisibility()
+          requestAnimationFrame(step)
         }
       }
       let result: any

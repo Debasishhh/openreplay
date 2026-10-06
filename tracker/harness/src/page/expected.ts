@@ -1,6 +1,18 @@
 // Serializes the live DOM the way a correct tracker+player pair should reproduce it.
-import Sanitizer, { SanitizeLevel, stringWiper } from '../../../../tracker/src/main/app/sanitizer.js'
-import { isIgnored } from '../next/NextObserver.js'
+import Sanitizer, { SanitizeLevel, stringWiper } from '@tracker/main/app/sanitizer.js'
+
+// the oracle keeps its own copy: it must not move with the code under test
+function isIgnored(node: Node): boolean {
+  if (node.nodeType === 3) return false
+  if (node.nodeType !== 1) return true
+  const tag = (node as Element).localName
+  if (tag === 'link') {
+    const rel = (node as Element).getAttribute('rel')
+    const as = (node as Element).getAttribute('as')
+    return !(rel?.includes('stylesheet') || as === 'style' || as === 'font')
+  }
+  return tag === 'script' || tag === 'noscript' || tag === 'meta' || tag === 'title' || tag === 'base'
+}
 
 const PRESERVE = new Set(['button', 'reset', 'submit', 'checkbox', 'radio'])
 const isSVG = (el: Element) =>

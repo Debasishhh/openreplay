@@ -2,7 +2,7 @@ export interface Scenario {
   kind: 'correct' | 'perf' | 'memory'
   setup?: () => void | Promise<void>
   steps: Array<() => void | Promise<void>>
-  /** ms to wait after each step (iframes: current core handles them on a 250ms timer) */
+  /** ms to wait after each step (iframes: the default core handles them on a 250ms timer) */
   settle?: number
   verifyEach?: boolean
   note?: string
@@ -441,7 +441,7 @@ export const scenarios: Record<string, Scenario> = {
   },
   p_append_2k: {
     kind: 'perf',
-    note: '300 batches, each appends one row to a 2k-row list (below the current core overflow)',
+    note: '300 batches, each appends one row to a 2k-row list (below the default core sibling-index overflow)',
     setup: () => app().append(h('div', { id: 'l' }, rows(2000))),
     steps: repeat(300, (i) => $('#l').append(row(20000 + i))),
   },

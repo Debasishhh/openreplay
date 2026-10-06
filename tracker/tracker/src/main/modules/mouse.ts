@@ -1,5 +1,5 @@
 import type App from '../app/index.js'
-import { hasTag, isSVGElement, isDocument } from '../app/guards.js'
+import { hasTag, isSVGElement, isDocument, isElementNode } from '../app/guards.js'
 import {
   hasOpenreplayAttribute,
   getLabelAttribute,
@@ -119,8 +119,9 @@ export function resolvePointerRoot(element: Element): Element {
 
 //TODO: fix (typescript is not sure about target variable after assignation of svg)
 function getTarget(target: EventTarget | null, document: Document, deep = false): Element | null {
-  if (target instanceof Element) {
-    return _getTarget(target, document, deep)
+  // no instanceof: elements of an iframe come from that frame's realm
+  if (target && isElementNode(target as Node)) {
+    return _getTarget(target as Element, document, deep)
   }
   return null
 }

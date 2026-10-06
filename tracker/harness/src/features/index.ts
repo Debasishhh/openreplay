@@ -1,5 +1,12 @@
-import CanvasRecorder, { watchCanvasContexts } from '../../../../tracker/src/main/app/canvas.js'
-import adoptedSS from '../../../../tracker/src/main/modules/constructedStyleSheets.js'
+// Feature checks against tracker modules in a real browser. Each check resolves to
+// { ok, details }; `node cli.mjs features` runs them.
+import CanvasRecorder, { watchCanvasContexts } from '@tracker/main/app/canvas.js'
+import adoptedSS from '@tracker/main/modules/constructedStyleSheets.js'
+import {
+  AdoptedSSAddOwner,
+  AdoptedSSInsertRuleURLBased,
+  AdoptedSSRemoveOwner,
+} from '@tracker/main/app/messages.gen.js'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -29,7 +36,10 @@ function glCanvas(color: [number, number, number]) {
   return { c, draw }
 }
 
-;(window as any).webgl = async () => {
+const checks: Record<string, () => Promise<{ ok: boolean; details: unknown }>> = {}
+;(window as any).checks = checks
+
+checks.webgl = async () => {
   const early = glCanvas([1, 0, 0]) // context created before the hook: old path
   watchCanvasContexts(window)
   const onDemand = glCanvas([0, 1, 0])
@@ -84,10 +94,12 @@ function glCanvas(color: [number, number, number]) {
       nonBlankFrames: counts.filter((c) => c > 0).length,
     }
   }
-  return out
+  // contexts created before the hook keep the timer capture, which reads a cleared buffer
+  const ok = out.onDemand.nonBlankFrames > 0 && out.continuous.nonBlankFrames > 0
+  return { ok, details: out }
 }
 
-;(window as any).adopted = async () => {
+checks.adoptedSheets = async () => {
   const sent: any[] = []
   const starts: any[] = []
   const app: any = {
@@ -112,10 +124,24 @@ function glCanvas(color: [number, number, number]) {
   const held = document.adoptedStyleSheets
   held.splice(0, 1, s2)
   await sleep(80)
-  return {
+  const details = {
     sameArrayIdentity: document.adoptedStyleSheets === held,
     isArray: Array.isArray(document.adoptedStyleSheets),
     length: document.adoptedStyleSheets.length,
     messages: sent.map((m) => m[0] + ':' + m.slice(1).join('|')),
   }
+  const ADD = AdoptedSSAddOwner(0, 0)[0]
+  const INSERT = AdoptedSSInsertRuleURLBased(0, '', 0, '')[0]
+  const REMOVE = AdoptedSSRemoveOwner(0, 0)[0]
+  // push: sheet A owned + its rule; splice(0, 1, B): B owned + its rule, A released
+  const seq = sent.map((m) => [m[0], m[1]])
+  const [a, b] = [seq[0]?.[1], seq[2]?.[1]]
+  const want = [[ADD, a], [INSERT, a], [ADD, b], [INSERT, b], [REMOVE, a]]
+  const ok =
+    details.sameArrayIdentity &&
+    details.isArray &&
+    details.length === 1 &&
+    a !== b &&
+    JSON.stringify(seq) === JSON.stringify(want)
+  return { ok, details }
 }

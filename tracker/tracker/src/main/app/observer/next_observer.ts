@@ -21,19 +21,15 @@ import {
   CreateTextNode,
   MoveNode,
   RemoveNode,
-  RemoveNodeAttribute,
   SetNodeAttribute,
-  SetNodeAttributeURLBased,
   SetNodeData,
   SetCSSDataURLBased,
   CreateIFrameDocument,
   SetNodeSlot,
   UnbindNodes,
-  AdoptedSSInsertRuleURLBased,
-  AdoptedSSAddOwner,
 } from '../messages.gen.js'
 import { SanitizeLevel } from '../sanitizer.js'
-import { hasTag, isSVGElement, isUseElement } from '../guards.js'
+import { hasTag, isSVGElement } from '../guards.js'
 import {
   createMutationObserver,
   throttleWithTrailing,
@@ -48,12 +44,10 @@ import {
   firstChild,
 } from '../untaintedDom.js'
 import NextNodes, { Rec } from '../nodes/next_nodes.js'
-import type { Offset } from './iframe_offsets.js'
-import { parseUseEl, shouldSkipValueAttribute } from './observer.js'
-import { inlineRemoteCss } from './cssInliner.js'
-import { nextID } from '../../modules/constructedStyleSheets.js'
+import IFrameOffsets, { Offset } from './iframe_offsets.js'
+import { isIgnored, sendNodeAttribute, AttributeContext } from './observer.js'
 import type TopObserver from './top_observer.js'
-import { getInlineOptions, Options } from './top_observer.js'
+import { getInlineOptions, sendColorScheme, Options } from './top_observer.js'
 
 const ELEMENT = 1
 const TEXT = 3
@@ -72,80 +66,15 @@ const REMOVING = 4
 const FRESH = 8
 const STALE = 16
 
-function isIgnored(node: Node): boolean {
-  const t = node.nodeType
-  if (t === TEXT) return false
-  if (t !== ELEMENT) return true
-  const tag = (node as Element).localName
-  if (tag === 'link') {
-    const rel = (node as Element).getAttribute('rel')
-    const as = (node as Element).getAttribute('as')
-    return !(rel?.includes('stylesheet') || as === 'style' || as === 'font')
-  }
-  return tag === 'script' || tag === 'noscript' || tag === 'meta' || tag === 'title' || tag === 'base'
+const hasPrivacyAttr = (names: Set<string>) => {
+  for (const name of names) if (name.startsWith('data-openreplay-')) return true
+  return false
 }
 
 const isStylesheetLink = (el: Element) => 'rel' in el && (el as HTMLLinkElement).rel === 'stylesheet'
 
 type Context = Window & typeof globalThis
 type ContextCallback = (context: Context) => void
-
-interface FrameOffset {
-  iframe: HTMLIFrameElement
-  parent: Document
-  offset: Offset | null
-  gen: number
-}
-
-/**
- * Iframe offsets for mouse coordinates, cached until the parent document scrolls or
- * resizes. One listener per parent document (not per iframe), and state keyed by the
- * frame's document only, so removed iframes and their documents can be collected.
- */
-class FrameOffsets {
-  private states = new WeakMap<Document, FrameOffset>()
-  private gens = new WeakMap<Document, number>()
-  private listeners: Array<{ target: EventTarget; type: string; fn: () => void }> = []
-  private listening = new WeakSet<Document>()
-
-  observe(iframe: HTMLIFrameElement) {
-    const doc = iframe.contentDocument
-    if (!doc) return
-    const parent = iframe.ownerDocument
-    this.states.set(doc, { iframe, parent, offset: null, gen: -1 })
-    if (this.listening.has(parent)) return
-    this.listening.add(parent)
-    const bump = () => this.gens.set(parent, (this.gens.get(parent) ?? 0) + 1)
-    parent.addEventListener('scroll', bump)
-    this.listeners.push({ target: parent, type: 'scroll', fn: bump })
-    const win = parent.defaultView
-    if (win) {
-      win.addEventListener('resize', bump)
-      this.listeners.push({ target: win, type: 'resize', fn: bump })
-    }
-  }
-
-  getDocumentOffset(doc: Document): Offset {
-    const state = this.states.get(doc)
-    if (!state) return [0, 0]
-    const [parentLeft, parentTop] = this.getDocumentOffset(state.parent)
-    const gen = this.gens.get(state.parent) ?? 0
-    if (state.offset === null || state.gen !== gen) {
-      const { left, top } = state.iframe.getBoundingClientRect()
-      state.offset = [left, top]
-      state.gen = gen
-    }
-    return [parentLeft + state.offset[0], parentTop + state.offset[1]]
-  }
-
-  clear() {
-    for (const l of this.listeners) l.target.removeEventListener(l.type, l.fn)
-    this.listeners = []
-    this.states = new WeakMap()
-    this.gens = new WeakMap()
-    this.listening = new WeakSet()
-  }
-}
 
 const nativeAttachShadow = IN_BROWSER ? Element.prototype.attachShadow : null
 
@@ -165,17 +94,17 @@ export default class NextObserver
   private readonly nodes: NextNodes
   private readonly options: Options
   private readonly inlineCss: boolean
-  private readonly inlinerOptions: { forceFetch?: boolean; forcePlain?: boolean } | undefined
   private readonly throttling: boolean
   private readonly mo: MutationObserver
-  private readonly domParser = IN_BROWSER ? new DOMParser() : (null as unknown as DOMParser)
-  private readonly iframeOffsets = new FrameOffsets()
+  private readonly attrCtx: AttributeContext
+  private readonly iframeOffsets = new IFrameOffsets()
   private readonly contextCallbacks: ContextCallback[] = []
   /** marks a window global whose context callbacks already ran (a new global after navigation has none) */
   private readonly contextMark = Symbol('openreplay-context')
   private readonly closedShadows = new WeakMap<Element, ShadowRoot>()
   private readonly frameDocs = new WeakMap<Element, Document>()
   private listened: Array<{ ref: { deref(): EventTarget | undefined }; type: string; fn: EventListener }> = []
+  private listenedPruneAt = 1024
   /** iframe windows whose context callbacks run once the current batch is committed */
   private newContexts: Context[] = []
   private active = false
@@ -185,8 +114,6 @@ export default class NextObserver
   private batch = 0
   private inBatch = false
   private colorSchemeMQL: MediaQueryList | null = null
-  /** bumped on disconnect so late async work (css inlining, sprites) of an old session bails */
-  private generation = 0
 
   // batch-local
   private removed: Node[] = []
@@ -208,8 +135,15 @@ export default class NextObserver
     ) as Options
     const inline = getInlineOptions(this.options.inlineCss, console.warn)
     this.inlineCss = inline.inlineRemoteCss
-    this.inlinerOptions = inline.inlinerOptions
     this.throttling = !this.options.disableThrottling
+    this.attrCtx = {
+      app: this.app,
+      disableSprites: this.options.disableSprites,
+      inlineRemoteCss: this.inlineCss,
+      inlinerOptions: inline.inlinerOptions,
+      domParser: IN_BROWSER ? new DOMParser() : (null as unknown as DOMParser),
+      generation: 0,
+    }
     this.mo = createMutationObserver(
       this.app.safe(this.onRecords) as MutationCallback,
       this.app.options.forceNgOff,
@@ -235,7 +169,7 @@ export default class NextObserver
     this.throttledSetNodeData.clear()
     this.nodes.resetIdSpace()
     this.startTop()
-    this.sendColorScheme()
+    sendColorScheme(this.app)
     // "DOM parsed" signal: the worker finalizes the initial visual batch on it
     this.app.send(SetNodeAttribute(0, 'orloaded', 'true'))
     if (IN_BROWSER && window.matchMedia) {
@@ -272,11 +206,12 @@ export default class NextObserver
       l.ref.deref()?.removeEventListener(l.type, l.fn, true)
     }
     this.listened = []
+    this.listenedPruneAt = 1024
     this.colorSchemeMQL?.removeEventListener?.('change', this.onColorScheme)
     this.colorSchemeMQL = null
     this.iframeOffsets.clear()
     this.throttledSetNodeData.clear()
-    this.generation++
+    this.attrCtx.generation++
     this.root = null
     this.resetBatch()
   }
@@ -327,6 +262,10 @@ export default class NextObserver
     target.addEventListener(type, fn, true)
     const ref = typeof WeakRef === 'function' ? new WeakRef(target) : { deref: () => target }
     this.listened.push({ ref, type, fn })
+    if (this.listened.length > this.listenedPruneAt) {
+      this.listened = this.listened.filter((l) => l.ref.deref() !== undefined)
+      this.listenedPruneAt = Math.max(1024, this.listened.length * 2)
+    }
   }
 
   private shadowOf(el: Element): ShadowRoot | null {
@@ -436,27 +375,7 @@ export default class NextObserver
   }
 
   private onColorScheme = () => {
-    this.app.safe(() => this.sendColorScheme())()
-  }
-
-  /** Resolved used color-scheme ('dark'|'light'|'normal') for the player to force on replay. */
-  private sendColorScheme(): void {
-    if (!IN_BROWSER) return
-    const root = document.documentElement
-    let declared = getComputedStyle(root).colorScheme
-    if (!declared || declared === 'normal') {
-      const meta = document.querySelector('meta[name="color-scheme" i]')
-      const content = meta && meta.getAttribute('content')
-      if (content) declared = content
-    }
-    let used = 'normal'
-    if (declared && declared !== 'normal') {
-      const prefersDark =
-        !!window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-      used =
-        declared.includes('dark') && (prefersDark || !declared.includes('light')) ? 'dark' : 'light'
-    }
-    this.app.send(SetNodeAttribute(0, '__openreplay_color_scheme', used))
+    this.app.safe(() => sendColorScheme(this.app))()
   }
 
   /** O(N) reverse lookup for ids outside the NextNodes index (e.g. assist targets). */
@@ -495,10 +414,16 @@ export default class NextObserver
       const m = records[i]
       const t = m.target
       if (m.type === 'childList') {
-        if (t === document && this.rootSwapped()) {
-          this.resetBatch()
-          this.startTop()
-          return
+        if (t === document && this.top) {
+          // <html> is the root record: start over when it is replaced or put back,
+          // ignore its removal (doctype and comments are not recorded)
+          const html = document.documentElement
+          if (html && (this.rootSwapped() || Array.prototype.includes.call(m.addedNodes, html))) {
+            this.resetBatch()
+            this.startTop()
+            return
+          }
+          continue
         }
         const rm = m.removedNodes
         for (let j = 0; j < rm.length; j++) this.removed.push(rm[j])
@@ -839,11 +764,22 @@ export default class NextObserver
 
   private flushUpdates() {
     const batch = this.batch
+    // levels are raised after placement; a node raised to hidden is rebuilt, placed again
+    this.pend.length = 0
+    let rebuilt = false
+    const checkAll = this.app.sanitizer.hasDomSanitizer
+    for (const [n, names] of this.attrs) {
+      if (!checkAll && !hasPrivacyAttr(names)) continue
+      const r = this.nodes.live(n)
+      if (r === undefined || (r.b === batch && r.f & FRESH) || n.nodeType !== ELEMENT) continue
+      if (this.raiseLevel(n, r, r.p?.lvl ?? SanitizeLevel.Plain)) rebuilt = true
+    }
+    if (rebuilt) this.place()
     for (const [n, names] of this.attrs) {
       const r = this.nodes.live(n)
       if (r === undefined || (r.b === batch && r.f & FRESH) || n.nodeType !== ELEMENT) continue
       for (const name of names) {
-        this.sendAttr(r.id, n as Element, name, (n as Element).getAttribute(name))
+        sendNodeAttribute(this.attrCtx, r.id, n as Element, name, (n as Element).getAttribute(name))
       }
     }
     for (const n of this.texts) {
@@ -900,32 +836,65 @@ export default class NextObserver
     const wasHidden = r.lvl === SanitizeLevel.Hidden
     const willHidden = newLevel === SanitizeLevel.Hidden
     if (wasHidden !== willHidden && r.p !== null) {
-      // crossing the hidden boundary changes the structure (placeholder vs subtree): rebuild
-      const p = r.p
-      this.app.send(RemoveNode(r.id))
-      p.n--
-      p.mut++
-      this.nodes.kill(r)
-      this.collect(node)
+      this.rebuild(r, node)
       return
     }
     if (willHidden) return
-    if (r.lvl !== newLevel) {
-      r.lvl = newLevel
-      this.app.sanitizer.setLevel(r.id, newLevel)
-      if (newLevel !== SanitizeLevel.Plain) this.nodes.addToIndex(r.id, node)
-      if (node.nodeType === TEXT) {
-        this.sendNodeData(r.id, parentNode(node) as Element, (node as Text).data)
-      } else if (node.nodeType === ELEMENT) {
-        // inputs/images/canvas re-emit their own payload via registered callbacks
-        this.app.callResanitizeCallbacks(node, r.id)
-      }
-    }
+    if (r.lvl !== newLevel) this.setLevel(r, node, newLevel)
     for (let c = firstChild(node); c !== null; c = nextSibling(c)) this.resanitizeNode(c, newLevel)
     if (node.nodeType === ELEMENT) {
       const sr = this.shadowOf(node as Element)
       if (sr) this.resanitizeNode(sr, newLevel)
     }
+  }
+
+  /**
+   * After an attribute change: raises the level of `node` and of the part of its subtree
+   * that rises with it. Never lowers one, that takes resanitizeSubtree.
+   * Returns true when something was queued for a rebuild.
+   */
+  private raiseLevel(node: Node, r: Rec, parentLevel: SanitizeLevel): boolean {
+    const lvl = this.app.sanitizer.computeLevel(node, parentLevel)
+    if (lvl <= r.lvl) return false
+    if (lvl === SanitizeLevel.Hidden) {
+      if (r.p === null) return false
+      this.rebuild(r, node)
+      return true
+    }
+    this.setLevel(r, node, lvl)
+    let rebuilt = false
+    for (let c = firstChild(node); c !== null; c = nextSibling(c)) {
+      const cr = this.nodes.live(c)
+      if (cr !== undefined && this.raiseLevel(c, cr, lvl)) rebuilt = true
+    }
+    const sr = node.nodeType === ELEMENT ? this.shadowOf(node as Element) : null
+    if (sr !== null) {
+      const srRec = this.nodes.live(sr)
+      if (srRec !== undefined && this.raiseLevel(sr, srRec, lvl)) rebuilt = true
+    }
+    return rebuilt
+  }
+
+  private setLevel(r: Rec, node: Node, lvl: SanitizeLevel) {
+    r.lvl = lvl
+    this.app.sanitizer.setLevel(r.id, lvl)
+    if (lvl !== SanitizeLevel.Plain) this.nodes.addToIndex(r.id, node)
+    if (node.nodeType === TEXT) {
+      this.sendNodeData(r.id, parentNode(node) as Element, (node as Text).data)
+    } else if (node.nodeType === ELEMENT) {
+      // inputs/images/canvas re-emit their own payload via registered callbacks
+      this.app.callResanitizeCallbacks(node, r.id)
+    }
+  }
+
+  /** Crossing the hidden boundary changes the structure (placeholder vs subtree): recreate it. */
+  private rebuild(r: Rec, node: Node) {
+    const p = r.p as Rec
+    this.app.send(RemoveNode(r.id))
+    p.n--
+    p.mut++
+    this.nodes.kill(r)
+    this.collect(node)
   }
 
   // ---- payload ---------------------------------------------------------------------------
@@ -952,112 +921,7 @@ export default class NextObserver
   private sendAttrs(r: Rec, el: Element) {
     const attrs = el.attributes
     for (let i = 0; i < attrs.length; i++) {
-      this.sendAttr(r.id, el, attrs[i].nodeName, attrs[i].value)
+      sendNodeAttribute(this.attrCtx, r.id, el, attrs[i].nodeName, attrs[i].value)
     }
-  }
-
-  // same rules as Observer.sendNodeAttribute
-  private sendAttr(id: number, node: Element, name: string, value: string | null): void {
-    if (isSVGElement(node)) {
-      if (name.startsWith('xlink:')) {
-        name = name.substring(6)
-      }
-      if (value === null) {
-        this.app.send(RemoveNodeAttribute(id, name))
-        return
-      }
-      if (isUseElement(node) && name === 'href' && !this.options.disableSprites) {
-        const gen = this.generation
-        parseUseEl(node, 'svgtext', this.domParser)
-          .then((svgData) => {
-            if (svgData && gen === this.generation) {
-              this.app.send(SetNodeAttribute(id, name, `_$OPENREPLAY_SPRITE$_${svgData}`))
-            }
-          })
-          .catch((e: any) => {
-            console.error('Openreplay: Error parsing <use> element:', e)
-          })
-        return
-      }
-      if (name === 'href') {
-        if (value.length > 1e5) {
-          value = ''
-        }
-        this.app.send(SetNodeAttributeURLBased(id, name, value, this.app.getBaseHref()))
-      } else {
-        this.app.attributeSender.sendSetAttribute(id, name, value)
-      }
-      return
-    }
-    if (name === 'open' && hasTag(node, 'dialog')) {
-      let mode: 'modal' | 'nonmodal' | 'closed'
-      if (value === null) {
-        mode = 'closed'
-      } else {
-        let isModal = false
-        try {
-          isModal = (node as HTMLDialogElement).matches('dialog:modal')
-        } catch (e) {
-          /* :modal pseudo-class unsupported on this browser */
-        }
-        mode = isModal ? 'modal' : 'nonmodal'
-      }
-      this.app.send(SetNodeAttribute(id, '__openreplay_dialog', mode))
-    }
-    if (
-      name === 'src' ||
-      name === 'srcset' ||
-      name === 'integrity' ||
-      name === 'crossorigin' ||
-      name === 'autocomplete' ||
-      name.substring(0, 2) === 'on'
-    ) {
-      return
-    }
-    if (name === 'value' && shouldSkipValueAttribute(node)) {
-      return
-    }
-    if (value === null) {
-      this.app.send(RemoveNodeAttribute(id, name))
-      return
-    }
-    if (name === 'style' || (name === 'href' && hasTag(node, 'link'))) {
-      if (isStylesheetLink(node) && this.inlineCss) {
-        const gen = this.generation
-        setTimeout(() => {
-          inlineRemoteCss(
-            node as HTMLLinkElement,
-            id,
-            this.app.getBaseHref(),
-            nextID,
-            ((sheetId: number, cssText: string, index: number, baseHref: string) => {
-              if (this.generation !== gen) return
-              this.app.send(AdoptedSSInsertRuleURLBased(sheetId, cssText, index, baseHref))
-            }) as any,
-            ((sheetId: number, ownerId: number) => {
-              if (this.generation !== gen) return
-              this.app.send(AdoptedSSAddOwner(sheetId, ownerId))
-            }) as any,
-            this.inlinerOptions?.forceFetch,
-            this.inlinerOptions?.forcePlain,
-            (cssText: string, fakeTextId: number) => {
-              if (this.generation !== gen) return
-              this.app.send(CreateTextNode(fakeTextId, id, 0))
-              this.app.send(SetCSSDataURLBased(fakeTextId, cssText, this.app.getBaseHref()))
-            },
-          )
-        }, 0)
-        return
-      }
-      this.app.send(SetNodeAttributeURLBased(id, name, value, this.app.getBaseHref()))
-      return
-    }
-    if (name === 'href' || value.length > 1e5) {
-      value = ''
-    }
-    if ((name === 'alt' || name === 'placeholder') && this.app.sanitizer.privateMode) {
-      value = value.replaceAll(/./g, '*')
-    }
-    this.app.attributeSender.sendSetAttribute(id, name, value)
   }
 }

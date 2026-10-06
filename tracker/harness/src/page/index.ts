@@ -1,8 +1,9 @@
 import { Mirror } from './mirror.js'
 import { expectedTree } from './expected.js'
-import { scenarios, ops, lab } from './scenarios.js'
-import { makeCurrent, makeNext, makeTrackerNext, Impl } from './impls.js'
-import MessageEncoder from '../../../../tracker/src/webworker/MessageEncoder.gen.js'
+import { scenarios, ops } from './scenarios.js'
+import type { Impl } from './impls/app.js'
+import impls from 'harness:impls'
+import MessageEncoder from '@tracker/webworker/MessageEncoder.gen.js'
 
 // time spent inside MutationObserver callbacks, whoever owns them
 const stats = { moTime: 0, moCalls: 0, moMax: 0 }
@@ -63,8 +64,9 @@ async function bytes(msgs: any[]) {
 const H = {
   stats,
   scenarios,
+  impls: Object.keys(impls),
   msgs: [] as any[],
-  impl: null as (Impl & any) | null,
+  impl: null as Impl | null,
   mirror: new Mirror(),
   applied: 0,
   mirrorAll() {
@@ -82,9 +84,11 @@ const H = {
     const d = firstDiff(got, want)
     return { label, ok: !d && m.errors.length === 0, diff: d, errors: m.errors.slice(0, 8) }
   },
+  /** `implName` 'none' runs the scenario without a tracker (memory baseline) */
   async run(name: string, implName: string) {
     const sc = scenarios[name]
     if (!sc) throw new Error(`no scenario ${name}`)
+    if (implName !== 'none' && !impls[implName]) throw new Error(`no impl ${implName}`)
     H.msgs = []
     H.mirror = new Mirror()
     H.applied = 0
@@ -94,13 +98,7 @@ const H = {
     stats.moTime = 0
     stats.moCalls = 0
     stats.moMax = 0
-    let impl: any = null
-    if (implName === 'current') impl = makeCurrent(send)
-    else if (implName === 'next') impl = makeNext(send, 'weakmap')
-    else if (implName === 'next-symbol') impl = makeNext(send, 'symbol')
-    else if (implName === 'current+gendict') impl = makeCurrent(send, true)
-    else if (implName === 'next+gendict') impl = makeNext(send, 'symbol', true)
-    else if (implName === 'tracker-next') impl = makeTrackerNext(send)
+    const impl = implName === 'none' ? null : impls[implName](send)
     H.impl = impl
     const t0 = performance.now()
     impl?.start()
@@ -164,41 +162,8 @@ const H = {
       finalOk: verifies.length ? verifies[verifies.length - 1].ok : null,
     }
   },
-  /** strong references the tracker keeps (current core only has this map) */
   trackedNodes() {
-    const n = H.impl?.nodes
-    return n ? n.getNodeCount() : null
-  },
-  async wideProbe(impl: string, n: number, kind: string) {
-    const app = document.getElementById('app')!
-    app.innerHTML = ''
-    const l = document.createElement('div')
-    for (let i = 0; i < n; i++) {
-      const c = document.createElement('i')
-      if (kind === 'row') c.append(document.createElement('b'), 'txt')
-      l.append(c)
-    }
-    app.append(l)
-    H.msgs = []
-    const send = (m: any) => H.msgs.push(m)
-    const t = impl === 'current' ? makeCurrent(send) : makeNext(send, 'weakmap')
-    t.start()
-    const before = H.msgs.length
-    let err = ''
-    window.addEventListener('error', (e) => (err = String(e.message)), { once: true })
-    l.append(document.createElement('u'))
-    await tick(0)
-    const created = H.msgs.slice(before).filter((m) => m[0] === 8).length
-    // unrelated mutation afterwards, in a small container
-    const b2 = H.msgs.length
-    const small = document.createElement('p')
-    app.append(small)
-    await tick(0)
-    small.append(document.createElement('em'))
-    await tick(0)
-    const later = H.msgs.slice(b2).filter((m) => m[0] === 8).length
-    t.stop()
-    return { n, created, later, err }
+    return H.impl?.trackedNodes() ?? null
   },
   /** encoded bytes per message type, the way the worker writes them (type + 3-byte size + body) */
   sizesByType(msgs: any[]) {

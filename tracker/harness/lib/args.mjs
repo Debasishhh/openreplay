@@ -1,0 +1,17 @@
+/** `cli.mjs <suite> [filter...] [--key=value] [--flag]` */
+export function parseArgs(argv) {
+  const positional = []
+  const flags = {}
+  for (const a of argv) {
+    if (!a.startsWith('--')) {
+      positional.push(a)
+      continue
+    }
+    const eq = a.indexOf('=')
+    if (eq === -1) flags[a.slice(2)] = true
+    else flags[a.slice(2, eq)] = a.slice(eq + 1)
+  }
+  const list = (k, d) => (typeof flags[k] === 'string' ? flags[k].split(',').filter(Boolean) : d)
+  const num = (k, d) => (flags[k] === undefined ? d : Number(flags[k]))
+  return { suite: positional[0], rest: positional.slice(1), flags, list, num }
+}

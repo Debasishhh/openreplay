@@ -1,7 +1,7 @@
 // Replays tracker tuples through the real player (ReplayEngine = Screen + PagesManager)
 // and serializes the painted DOM in the harness format.
-import ReplayEngine from '../../../../../mcp_app/src/player/ReplayEngine'
-import translate from '../../../../../player/src/web/messages/tracker.gen'
+import ReplayEngine from '../../../../mcp_app/src/player/ReplayEngine'
+import translate from '@openreplay/player/web/messages/tracker.gen'
 
 function ser(n: Node): string {
   if (n.nodeType === 3) return JSON.stringify((n as Text).data)

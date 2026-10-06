@@ -32,7 +32,10 @@ interface AxiosInterceptorManager {
   ): number
 }
 
-/** The part of an axios (0.x or 1.x) instance the network module uses. */
+/**
+ * The part of an axios (0.x or 1.x) instance the network module uses. Not network-proxy's
+ * own type: its declarations use extensionless imports, which break NodeNext consumers.
+ */
 export interface AxiosInstance {
   interceptors: {
     request: AxiosInterceptorManager

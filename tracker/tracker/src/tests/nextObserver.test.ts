@@ -106,7 +106,7 @@ const flush = () => new Promise((r) => setTimeout(r, 0))
 const ofType = (t: number) => sent.filter((m) => m[0] === t)
 const $ = (s: string) => document.querySelector(s) as HTMLElement
 
-function setup(body: string, options: any = {}) {
+function setup(body: string, options: any = {}, sanitizerOptions: any = {}) {
   document.documentElement.innerHTML = `<head></head><body>${body}</body>`
   sent = []
   app = {
@@ -117,7 +117,7 @@ function setup(body: string, options: any = {}) {
     callResanitizeCallbacks: jest.fn(),
     debug: { log() {}, warn() {}, info() {}, error() {} },
   }
-  app.sanitizer = new Sanitizer({ app, options: { obscureTextEmails: false } })
+  app.sanitizer = new Sanitizer({ app, options: { obscureTextEmails: false, ...sanitizerOptions } })
   app.nodes = nodes = new NextNodes({
     forceNgOff: true,
     onUnregister: (id: number) => app.sanitizer.setLevel(id, SanitizeLevel.Plain),
@@ -270,18 +270,117 @@ describe('NextObserver privacy', () => {
     expect(hostIds).toEqual([nodes.getID(a)])
   })
 
-  test('resanitize: toggling hidden rebuilds the subtree as a placeholder', async () => {
-    setup('<div id="d"><p>text</p></div>')
+  test('resanitize: a domSanitizer turning hidden rebuilds the subtree as a placeholder', () => {
+    let hide = false
+    setup('<div id="d"><p>text</p></div>', {}, {
+      domSanitizer: (el: Element) => (hide && el.id === 'd' ? SanitizeLevel.Hidden : SanitizeLevel.Plain),
+    })
     observer.observe()
     const d = $('#d')
-    d.setAttribute('data-openreplay-hidden', '')
-    await flush()
+    hide = true
     const before = sent.length
     observer.resanitizeSubtree(d)
     const after = sent.slice(before)
     expect(after[0][0]).toBe(Type.RemoveNode)
     expect(after.some((m) => m[0] === Type.CreateTextNode)).toBe(false)
     expect(app.sanitizer.isHidden(nodes.getID(d))).toBe(true)
+  })
+})
+
+describe('NextObserver privacy changes after insertion', () => {
+  const data = (id: number) => ofType(Type.SetNodeData).filter((m) => m[1] === id).map((m) => m[2])
+
+  test('a mask attribute masks the text already sent and the text sent later', async () => {
+    setup('<div id="d"><p>card 4111</p><input id="i"></div>')
+    observer.observe()
+    const text = $('#d p').firstChild as Text
+    $('#d').setAttribute('data-openreplay-obscured', '')
+    await flush()
+    expect(data(nodes.getID(text)).pop()).not.toContain('4111')
+    expect(app.callResanitizeCallbacks).toHaveBeenCalledWith($('#i'), nodes.getID($('#i')))
+    text.data = 'card 5500'
+    await flush()
+    expect(data(nodes.getID(text)).pop()).not.toContain('5500')
+    expect(app.sanitizer.isObscured(nodes.getID($('#i')))).toBe(true)
+  })
+
+  test('a hide attribute turns the element into a placeholder', async () => {
+    setup('<div id="d"><p>secret</p></div>')
+    observer.observe()
+    const oldId = nodes.getID($('#d'))
+    $('#d').setAttribute('data-openreplay-hidden', '')
+    $('#d p').textContent = 'more secret'
+    await flush()
+    expect(ofType(Type.RemoveNode)).toContainEqual([Type.RemoveNode, oldId])
+    const newId = nodes.getID($('#d'))
+    expect(app.sanitizer.isHidden(newId)).toBe(true)
+    expect(mirror().html()).not.toContain('secret')
+    expect(mirror().errors).toEqual([])
+  })
+
+  test('a class matched by domSanitizer masks the element', async () => {
+    setup('<p id="p">4111 1111</p>', {}, {
+      domSanitizer: (el: Element) => (el.classList.contains('pii') ? SanitizeLevel.Obscured : SanitizeLevel.Plain),
+    })
+    observer.observe()
+    $('#p').classList.add('pii')
+    await flush()
+    expect(mirror().html()).not.toContain('4111')
+  })
+
+  test('without domSanitizer, other attribute changes do not recompute levels', async () => {
+    setup('<p id="p">text</p>')
+    observer.observe()
+    const computeLevel = jest.spyOn(app.sanitizer, 'computeLevel')
+    $('#p').className = 'a'
+    $('#p').style.color = 'red'
+    await flush()
+    expect(computeLevel).not.toHaveBeenCalled()
+  })
+})
+
+describe('NextObserver root removal', () => {
+  test('removing <html> sends nothing; putting it back starts a new document', async () => {
+    setup('<p>before</p>')
+    observer.observe()
+    const html = document.documentElement
+    html.remove()
+    await flush()
+    expect(ofType(Type.RemoveNode)).toEqual([])
+    html.querySelector('p')!.textContent = 'changed while detached'
+    document.appendChild(html)
+    await flush()
+    expect(ofType(Type.CreateDocument)).toHaveLength(2)
+    expectInSync()
+  })
+})
+
+describe('NextObserver listeners', () => {
+  test('listeners of collected shadow roots are not kept', async () => {
+    const RealRef = globalThis.WeakRef
+    const collected = new WeakSet<object>()
+    globalThis.WeakRef = class {
+      constructor(private t: object) {}
+      deref() {
+        return collected.has(this.t) ? undefined : this.t
+      }
+    } as any
+    try {
+      setup('')
+      observer.observe()
+      for (let round = 0; round < 3; round++) {
+        const hosts = Array.from({ length: 1000 }, () => document.createElement('x-row'))
+        document.body.append(...hosts)
+        await flush()
+        for (const host of hosts) collected.add(host.attachShadow({ mode: 'open' }))
+        expect(ofType(Type.CreateIFrameDocument).length).toBe((round + 1) * 1000)
+        hosts.forEach((h) => h.remove())
+        await flush()
+      }
+      expect(observer['listened'].length).toBeLessThan(1100)
+    } finally {
+      globalThis.WeakRef = RealRef
+    }
   })
 })
 
