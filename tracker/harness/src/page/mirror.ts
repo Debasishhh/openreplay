@@ -108,7 +108,10 @@ export class Mirror {
       case T.SetNodeAttributeDictGlobal: {
         const n = this.nodes.get(m[1])
         if (!n) return this.err(`SetAttrDict: ${m[1]} missing`)
-        n.attrs.set(this.dict.get(m[2]) ?? '?', this.dict.get(m[3]) ?? '?')
+        const name = this.dict.get(m[2])
+        const value = this.dict.get(m[3])
+        if (name === undefined || value === undefined) return this.err(`SetAttrDict: ${m[1]} dictionary entry missing`)
+        n.attrs.set(name, value)
         return
       }
       case T.RemoveNodeAttribute: {
@@ -130,6 +133,18 @@ export class Mirror {
         const r = new MNode(m[2], '#root')
         this.nodes.set(m[2], r)
         host.root = r
+        return
+      }
+      case T.SetNodeSlot: {
+        const n = this.nodes.get(m[1])
+        if (!n) return this.err(`SetNodeSlot: ${m[1]} missing`)
+        const slot = m[2] > 0 ? this.nodes.get(m[2]) : undefined
+        if (m[2] > 0 && slot?.tag.toUpperCase() !== 'SLOT') return this.err(`SetNodeSlot: slot ${m[2]} missing`)
+        if (n.tag === '#text') return
+        // like DOMManager: named slot -> slot attribute, default slot / unassigned -> none
+        const name = slot?.attrs.get('name')
+        if (name && name !== 'default') n.attrs.set('slot', name)
+        else n.attrs.delete('slot')
         return
       }
       case T.UnbindNodes:

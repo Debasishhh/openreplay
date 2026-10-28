@@ -24,7 +24,7 @@ export function fakeApp(send: (m: any) => void) {
     options: { forceNgOff: true },
     safe: (f: any) => f,
     send,
-    getBaseHref: () => location.origin + '/',
+    getBaseHref: () => document.baseURI,
     callResanitizeCallbacks: () => {},
     debug: { log() {}, warn() {}, info() {}, error() {} },
   }

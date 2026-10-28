@@ -83,13 +83,14 @@ async function runOne(browser, base, col, name, opts) {
 
 function coreCell(r, replay) {
   const mirror = r.ok ? 'OK' : 'FAIL'
-  return replay ? `${mirror}/${r.replayDiff ? 'diff' : 'ok'}` : mirror
+  return (replay ? `${mirror}/${r.replayDiff ? 'diff' : 'ok'}` : mirror) + (r.errors?.length ? ' !err' : '')
 }
-const passed = (r) => r.ok && !r.replayDiff
+const passed = (r) => r.ok && !r.errors?.length && !r.replayDiff
 
 function perfCell(r, first) {
+  if (!r.ok) return 'FAIL'
   let cell = ms(cost(r))
-  if (first && first !== r) {
+  if (first && first !== r && first.ok) {
     cell += ` ${ratio(cost(first), cost(r))}`
     // fewer messages for the same steps means the tree dropped something
     if (Math.abs(r.msgs - first.msgs) > first.msgs * 0.005) cell += ` msgs ${r.msgs - first.msgs > 0 ? '+' : ''}${r.msgs - first.msgs}`
@@ -98,8 +99,9 @@ function perfCell(r, first) {
 }
 
 function memCell(r, late) {
+  if (!r.ok) return 'FAIL'
   const m = late ? r.memLate : r.mem
-  return m ? `${m.nodes}n ${m.documents}d ${m.listeners}l ${m.heapMB}MB` : ''
+  return (m ? `${m.nodes}n ${m.documents}d ${m.listeners}l ${m.heapMB}MB` : '') + (r.errors?.length ? ' !err' : '')
 }
 
 function printFailures(rows, columns) {
@@ -157,8 +159,9 @@ export async function runScenarios(suite, args) {
         progress(`[${n + 1}/${scenarios.length}] ${sc.name} ${col.label}`)
         const runs = []
         for (let k = 0; k < reps; k++) runs.push(await runOne(browser, server.base, col, sc.name, opts))
-        runs.sort((a, b) => cost(a) - cost(b))
-        row.cells.push(runs[Math.floor(runs.length / 2)])
+        // a timed-out run costs 0 and would win the median
+        const good = runs.filter((r) => r.ok).sort((a, b) => cost(a) - cost(b))
+        row.cells.push(good.length ? good[Math.floor(good.length / 2)] : runs[0])
       }
       rows.push(row)
     }

@@ -17,8 +17,8 @@ node cli.mjs help
 ## Suites
 
 DOM core: the observers are driven directly (no worker, no transport). Every message is
-applied to a mirror with the player's tree semantics and compared with the live DOM after
-each step.
+applied to a mirror with the player's tree semantics; every correctness scenario is checked
+against the live DOM at snapshot and at the end, `verifyEach` scenarios also after each step.
 
 | suite | what | useful flags |
 |---|---|---|
@@ -44,7 +44,8 @@ worktrees and build output (`--results` also the JSON results).
 Common flags: positional filters match scenario names (`core shadow iframe`),
 `--impls=default,next` (DOM-core suites) or `--modes=default,next` (full-tracker suites),
 `--no-build` reuses this checkout's tracker dist, `--strict` exits 1 on any failure,
-`--timeout=<ms>` per run. Every run writes `results/<suite>-<time>.json`.
+`--timeout=<ms>` per run (DOM-core suites). Suite runs (not `list`/`profile`/`clean`) write
+`results/<suite>-<time>.json`.
 
 ## Baselines
 

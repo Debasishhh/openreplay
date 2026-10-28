@@ -1,7 +1,7 @@
 import { serve } from '../lib/server.mjs'
 import { launch } from '../lib/browser.mjs'
 import { resolveTargets } from '../lib/targets.mjs'
-import { scenarioRoutes, listScenarios } from './scenarios.mjs'
+import { scenarioRoutes, listScenarios, matches } from './scenarios.mjs'
 
 export async function runList(args) {
   const targets = resolveTargets(args)
@@ -12,7 +12,7 @@ export async function runList(args) {
     const list = await listScenarios(browser, server.base, targets[targets.length - 1])
     for (const kind of ['correct', 'perf', 'memory']) {
       console.log(`\n${kind === 'correct' ? 'core / e2e' : kind}:`)
-      for (const s of list.filter((x) => x.kind === kind)) console.log(`  ${s.name.padEnd(24)} ${s.note}`)
+      for (const s of list.filter((x) => x.kind === kind && matches(x.name, args.rest))) console.log(`  ${s.name.padEnd(24)} ${s.note}`)
     }
     return 0
   } finally {

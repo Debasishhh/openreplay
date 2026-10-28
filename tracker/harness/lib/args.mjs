@@ -12,6 +12,11 @@ export function parseArgs(argv) {
     else flags[a.slice(2, eq)] = a.slice(eq + 1)
   }
   const list = (k, d) => (typeof flags[k] === 'string' ? flags[k].split(',').filter(Boolean) : d)
-  const num = (k, d) => (flags[k] === undefined ? d : Number(flags[k]))
+  const num = (k, d) => {
+    if (flags[k] === undefined) return d
+    const v = Number(flags[k])
+    if (!(v > 0)) throw new Error(`--${k} must be a positive number`)
+    return v
+  }
   return { suite: positional[0], rest: positional.slice(1), flags, list, num }
 }

@@ -94,7 +94,16 @@ function imgModuleAttrs(el: Element, lvl: SanitizeLevel, parentLvl: SanitizeLeve
     if (!img.hasAttribute('height')) out.push(['height', String(height)])
     return out
   }
-  if (img.getAttribute('src')) out.push(['src', img.src])
+  if (img.getAttribute('src')) {
+    if (img.src.length > 1e5) {
+      const { width, height } = img.getBoundingClientRect()
+      out.push(['src', PLACEHOLDER_SRC])
+      if (!img.hasAttribute('width')) out.push(['width', String(width)])
+      if (!img.hasAttribute('height')) out.push(['height', String(height)])
+    } else {
+      out.push(['src', img.src])
+    }
+  }
   if (img.srcset) out.push(['srcset', resolveSrcset(img.srcset)])
   return out
 }

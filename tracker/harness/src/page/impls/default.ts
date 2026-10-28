@@ -5,7 +5,11 @@ import { fakeApp, ImplFactory, OBSERVER_OPTIONS } from './app.js'
 /** The default DOM core: TopObserver + Nodes (maintainer on). */
 const make: ImplFactory = (send) => {
   const app = fakeApp(send)
-  app.nodes = new Nodes({ node_id: '__openreplay_id', forceNgOff: true })
+  app.nodes = new Nodes({
+    node_id: '__openreplay_id',
+    forceNgOff: true,
+    onUnregister: (id: number) => app.sanitizer.setLevel(id, 0),
+  })
   const obs = new TopObserver({ app, options: OBSERVER_OPTIONS })
   return {
     start: () => obs.observe(),

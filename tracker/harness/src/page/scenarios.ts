@@ -520,7 +520,7 @@ export const scenarios: Record<string, Scenario> = {
   m_iframe_churn: {
     kind: 'memory',
     settle: 350,
-    note: '20x: add a same-origin iframe with ~2k nodes, then remove it',
+    note: '20x: add a same-origin iframe with ~1k nodes, then remove it',
     steps: repeat(40, async (i) => {
       if (i % 2 === 0) {
         const body = Array.from({ length: 150 }, (_, k) => `<div class="r"><span>${k}</span><a href="#">x</a><b>y</b></div>`).join('')

@@ -3,7 +3,7 @@ import { CACHE, WORKSPACE } from '../lib/paths.mjs'
 import { buildFeatures } from '../lib/build.mjs'
 import { serve, pageHtml } from '../lib/server.mjs'
 import { launch } from '../lib/browser.mjs'
-import { table } from '../lib/report.mjs'
+import { table, saveResults } from '../lib/report.mjs'
 import { matches } from './scenarios.mjs'
 
 /** Runs window.checks from src/features against this checkout's tracker modules. */
@@ -34,6 +34,8 @@ export async function runFeatures(args) {
       if (!r.ok || args.flags.verbose) console.log(`${name}:`, JSON.stringify(r.details, null, 1))
     }
     table(['check', 'result', 'page errors'], rows)
+    const file = saveResults('features', { suite: 'features', rows, failed })
+    console.log(`results: ${path.relative(process.cwd(), file)}`)
     return args.flags.strict && failed ? 1 : 0
   } finally {
     await browser.close()

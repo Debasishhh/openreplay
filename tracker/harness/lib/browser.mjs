@@ -40,7 +40,7 @@ export function normalizeTree(x, origin) {
   return x
     .split(origin)
     .join('')
-    .replace(/style="([^"]*)"/g, (m, v) => `style="${v.replace(/\\"/g, "'").replace(/\s+/g, '').replace(/;$/, '')}"`)
+    .replace(/style="([^"]*)"/g, (m, v) => `style="${v.replace(/\\"/g, "'").replace(/\s*([:;,])\s*/g, '$1').replace(/\s+/g, ' ').trim().replace(/;$/, '')}"`)
     .replace(/<HTML style="color-scheme:normal">/, '<HTML>')
     .replace(/ autocomplete="[^"]*"/g, '')
 }

@@ -31,7 +31,7 @@ Options:
   --baseline=<ref>     also run against a git ref (branch, tag, sha), side by side
   --no-build           full-tracker suites: reuse this checkout's tracker dist
   --strict             exit 1 on any failure (core, e2e, modules, features)
-  --timeout=120000     per scenario run, ms
+  --timeout=120000     per scenario run, ms (core/perf/memory)
 `
 
 const args = parseArgs(process.argv.slice(2))
@@ -66,10 +66,12 @@ async function main() {
   }
 }
 
+// exit only after stdout drains: pipes are async, a bare exit can cut the tables off
+const exit = (code) => process.stdout.write('', () => process.exit(code))
 main().then(
-  (code) => process.exit(code ?? 0),
+  (code) => exit(code ?? 0),
   (e) => {
     console.error(e instanceof Error ? e.message : e)
-    process.exit(1)
+    exit(1)
   },
 )

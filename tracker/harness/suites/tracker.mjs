@@ -116,7 +116,7 @@ async function e2e(browser, base, ctx, args) {
     rows.push({ name: sc.name, cells })
   }
   const cell = (r) => (!r.started ? 'NOSTART' : r.diff ? 'DIFF' : 'OK') + (r.errors.length ? ' !err' : '')
-  const ok = (r) => r.started && !r.diff
+  const ok = (r) => r.started && !r.diff && !r.errors.length
   table(
     ['scenario', ...columns.map((c) => c.label)],
     [
@@ -148,6 +148,7 @@ async function bytes(browser, base, ctx, args) {
     const cells = []
     for (const [i, col] of columns.entries()) {
       const r = await runScenario(browser, base, col, sc.name, 'bytes')
+      if (!r.started) throw new Error(`tracker failed to start for ${sc.name} [${col.label}]`)
       r.total = Object.values(r.sizes).reduce((n, v) => n + v.bytes, 0)
       for (const [type, v] of Object.entries(r.sizes)) {
         const e = (byType[names[type] ?? `type ${type}`] ??= columns.map(() => ({ n: 0, bytes: 0 })))
@@ -261,7 +262,7 @@ async function leaks(browser, base, ctx, args) {
           if (opts) {
             const { default: Tracker } = await import(url)
             window.tracker = new Tracker(opts)
-            await window.tracker.start()
+            if (!(await window.tracker.start())?.success) throw new Error('tracker did not start')
           }
           const tick = (ms) => new Promise((r) => setTimeout(r, ms))
           const app = document.getElementById('app')
