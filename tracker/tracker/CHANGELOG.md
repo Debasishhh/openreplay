@@ -4,7 +4,7 @@
 - WebGL canvases are recorded (were blank frames): contexts are noted when created and a frame is captured right after the page draws; idle WebGL canvases no longer resend frames. Contexts created before the tracker was constructed, or with `preserveDrawingBuffer`, keep the timer capture
 - `adoptedStyleSheets.push()` / `splice()` / index writes are recorded (only assignment was)
 - attribute string dictionary hits no longer re-insert into the LRU map on every lookup (~4µs → ~30ns per attribute)
-- privacy: `src`/`srcset` changes of masked images, selection text inside masked content, and a password field switched to `type=text` are no longer recorded in plain
+- privacy: selection text inside masked content and a password field switched to `type=text` are no longer recorded in plain
 - `replaceHashSymbol` no longer resends the page location on every tick
 - JS errors and rejections from same-origin iframes are recorded (were dropped / sent as `{}`)
 - font sources with relative `url()` are resolved against the page, web vitals aren't duplicated after a restart
