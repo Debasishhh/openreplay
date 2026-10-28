@@ -127,21 +127,25 @@ export class FetchProxyHandler<T extends typeof fetch> implements ProxyHandler<T
       // init.headers replaces the Request's headers entirely, so only add it there if it's already set
       if (argsList[1]?.headers === undefined && isRequest(argsList[0])) {
         // already set by the app or the axios hook: append would join the values
-        if (!argsList[0].headers.has(name)) argsList[0].headers.append(name, value);
+        if (!argsList[0].headers.has(name)) {
+          argsList[0].headers.append(name, value);
+          item.sessionTokenSent = true;
+        }
         return;
       } else {
-        if (!argsList[1]) argsList[1] = {};
-        if (argsList[1].headers === undefined) {
-          argsList[1] = { ...argsList[1], headers: {} };
-        }
-        if (argsList[1].headers instanceof Headers) {
-          if (!argsList[1].headers.has(name)) argsList[1].headers.append(name, value);
-        } else if (Array.isArray(argsList[1].headers)) {
-          argsList[1].headers.push([name, value]);
+        // copies, not the app's own headers: it may reuse them for a url that must not get the token
+        const init = argsList[1] || {};
+        const headers = new Headers(init.headers);
+        if (headers.has(name)) return;
+        if (init.headers instanceof Headers) {
+          headers.append(name, value);
+          argsList[1] = { ...init, headers };
+        } else if (Array.isArray(init.headers)) {
+          argsList[1] = { ...init, headers: [...init.headers, [name, value]] };
         } else {
-          // @ts-ignore
-          argsList[1].headers[name] = value;
+          argsList[1] = { ...init, headers: { ...init.headers, [name]: value } };
         }
+        item.sessionTokenSent = true;
       }
     });
     return (<ReturnType<T>>target.apply(this.context, argsList))
@@ -199,9 +203,9 @@ export class FetchProxyHandler<T extends typeof fetch> implements ProxyHandler<T
       item.startTime = performance.now();
     }
 
-    if (Object.prototype.toString.call(requestHeader) === "[object Headers]") {
+    if (Object.prototype.toString.call(requestHeader) === "[object Headers]" || Array.isArray(requestHeader)) {
       item.requestHeader = {};
-      for (const [key, value] of <Headers>requestHeader) {
+      for (const [key, value] of <Headers | [string, string][]>requestHeader) {
         item.requestHeader[key] = value;
       }
     } else {

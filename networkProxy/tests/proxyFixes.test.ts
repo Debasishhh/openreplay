@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import FetchProxy from "../src/fetchProxy";
 import XHRProxy from "../src/xhrProxy";
+import BeaconProxy from "../src/beaconProxy";
 import { genStringBody } from "../src/utils";
+import { filterBody } from "../src/sanitizers";
 
 const flush = async () => {
   for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -9,6 +11,7 @@ const flush = async () => {
 
 const noToken = () => {};
 const identity = (x: any) => x;
+const token = (cb: (n: string, v: string) => void) => cb("X-OpenReplay-SessionToken", "t");
 
 describe("fetch proxy fixes", () => {
   it("captures fetch(new URL(...))", async () => {
@@ -50,7 +53,6 @@ describe("fetch proxy fixes", () => {
     expect(sendMessage.mock.calls[0][0].url).toBe("https://frame.example.com/embed/data.json");
   });
 
-  const token = (cb: (n: string, v: string) => void) => cb("X-OpenReplay-SessionToken", "t");
   const makeRequest = () =>
     new Request("https://api.example.com/a", {
       method: "POST",
@@ -228,9 +230,9 @@ describe("xhr proxy fixes", () => {
     }
   }
 
-  function makeXHR() {
+  function makeXHR(setToken = noToken, tokenUrlMatcher?: (url: string) => boolean) {
     const sendMessage = vi.fn();
-    const Wrapped = XHRProxy.create(false, noToken, identity, sendMessage, (u) => u.includes("/ingest"), undefined, FakeXHR as any);
+    const Wrapped = XHRProxy.create(false, setToken, identity, sendMessage, (u) => u.includes("/ingest"), tokenUrlMatcher, FakeXHR as any);
     const xhr = new Wrapped() as unknown as FakeXHR & XMLHttpRequest;
     const sent = () => sendMessage.mock.calls.map(([m]) => ({ url: m.url, status: m.status, request: JSON.parse(m.request) }));
     return { xhr, sent };
@@ -287,11 +289,107 @@ describe("xhr proxy fixes", () => {
     xhr.abort();
     expect(sent()).toEqual([]);
   });
+
+  it("records the session token header only on requests it was sent with", () => {
+    const { xhr, sent } = makeXHR(token, (url) => url.startsWith("https://api.example.com/"));
+    const setHeader = vi.spyOn(FakeXHR.prototype, "setRequestHeader");
+    xhr.open("GET", "https://third.party.com/a");
+    xhr.send();
+    xhr.respond(200, "{}");
+    xhr.open("GET", "https://api.example.com/b");
+    xhr.send();
+    xhr.respond(200, "{}");
+    expect(setHeader.mock.calls).toEqual([["X-OpenReplay-SessionToken", "t"]]);
+    expect(sent().map((m) => m.request.headers)).toEqual([{}, { "X-OpenReplay-SessionToken": "t" }]);
+    setHeader.mockRestore();
+  });
 });
 
 describe("genStringBody", () => {
   it("keeps JSON bodies that contain '&'", () => {
     expect(genStringBody('{"q":"a&b"}')).toBe('{"q":"a&b"}');
     expect(genStringBody("a=1&b=2")).toBe("a=1,b=2");
+  });
+});
+
+describe("url-encoded bodies", () => {
+  it("masks sensitive fields of string, URLSearchParams and FormData bodies", () => {
+    expect(genStringBody("user=a&password=secret")).toBe("user=a,password=******");
+    expect(genStringBody(new URLSearchParams({ user: "a", token: "abc" }))).toBe("user=a,token=***");
+    const form = new FormData();
+    form.append("Password", "hunter2");
+    form.append("note", "x");
+    expect(genStringBody(form)).toBe("Password=*******,note=x");
+  });
+
+  it("filterBody masks url-encoded fields and keeps the rest of the text", () => {
+    expect(filterBody("password=secret")).toBe("password=******");
+    expect(filterBody("a=1&api%5Fkey=k1&apiKey=k2&b=2")).toBe("a=1&api%5Fkey=**&apiKey=**&b=2");
+    expect(filterBody("https://x.io/cb?token=abc&state=s")).toBe("https://x.io/cb?token=***&state=s");
+    expect(filterBody("my password=secret")).toBe("my password=secret");
+    expect(filterBody("plain text")).toBe("plain text");
+  });
+
+  it("fetch records a form post with the password masked", async () => {
+    const sendMessage = vi.fn();
+    const target = vi.fn().mockResolvedValue(new Response("{}", { headers: { "content-type": "application/json" } }));
+    const wrapped = FetchProxy.create(false, noToken, identity, sendMessage, () => false, undefined, target as any);
+    await wrapped("https://api.example.com/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "user=a&password=secret",
+    });
+    await flush();
+    expect(JSON.parse(sendMessage.mock.calls[0][0].request).body).toBe("user=a,password=******");
+  });
+});
+
+describe("session token header with tokenUrlMatcher", () => {
+  const ok = () => Promise.resolve(new Response("{}", { headers: { "content-type": "application/json" } }));
+  const onlyApi = (url: string) => url.startsWith("https://api.example.com/");
+  const recordedHeaders = (sendMessage: any) => sendMessage.mock.calls.map(([m]: any) => JSON.parse(m.request).headers);
+
+  it("fetch records the token only where it was sent", async () => {
+    const sendMessage = vi.fn();
+    const target = vi.fn((_input: any, _init?: RequestInit) => ok());
+    const wrapped = FetchProxy.create(false, token, identity, sendMessage, () => false, onlyApi, target as any);
+    await wrapped("https://third.party.com/a");
+    await wrapped("https://api.example.com/b");
+    await flush();
+    expect(new Headers(target.mock.calls[0][1]?.headers).has("x-openreplay-sessiontoken")).toBe(false);
+    expect(new Headers(target.mock.calls[1][1]?.headers).get("x-openreplay-sessiontoken")).toBe("t");
+    expect(recordedHeaders(sendMessage)).toEqual([{}, { "X-OpenReplay-SessionToken": "t" }]);
+  });
+
+  it.each([
+    ["object", () => ({ "X-App": "1" })],
+    ["array", () => [["X-App", "1"]]],
+    ["Headers", () => new Headers({ "X-App": "1" })],
+  ])("fetch doesn't add the token to the app's own %s headers", async (_, make) => {
+    const target = vi.fn((_input: any, _init?: RequestInit) => ok());
+    const wrapped = FetchProxy.create(false, token, identity, vi.fn(), () => false, onlyApi, target as any);
+    const headers: any = make();
+    await wrapped("https://api.example.com/b", { headers });
+    await wrapped("https://third.party.com/a", { headers });
+    expect(new Headers(target.mock.calls[0][1]!.headers).get("x-openreplay-sessiontoken")).toBe("t");
+    expect(new Headers(target.mock.calls[1][1]!.headers).has("x-openreplay-sessiontoken")).toBe(false);
+    expect(new Headers(target.mock.calls[1][1]!.headers).get("x-app")).toBe("1");
+  });
+
+  it("fetch keeps a token the app set itself", async () => {
+    const sendMessage = vi.fn();
+    const target = vi.fn((_input: any, _init?: RequestInit) => ok());
+    const wrapped = FetchProxy.create(false, token, identity, sendMessage, () => false, undefined, target as any);
+    await wrapped("https://api.example.com/b", { headers: { "x-openreplay-sessiontoken": "app" } });
+    await flush();
+    expect(new Headers(target.mock.calls[0][1]!.headers).get("x-openreplay-sessiontoken")).toBe("app");
+    expect(recordedHeaders(sendMessage)).toEqual([{ "x-openreplay-sessiontoken": "app" }]);
+  });
+
+  it("beacons never record it: sendBeacon can't send headers", () => {
+    const sendMessage = vi.fn();
+    const send = BeaconProxy.create(vi.fn(() => true) as any, false, token, identity, sendMessage, () => false)!;
+    send("https://api.example.com/beacon", "x");
+    expect(recordedHeaders(sendMessage)[0]).toEqual({ "Content-Type": "text/plain;charset=UTF-8" });
   });
 });

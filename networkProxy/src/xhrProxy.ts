@@ -75,7 +75,10 @@ export class XHRProxyHandler<T extends XMLHttpRequest>
           // already set by the app or the axios hook: a second call would join the values
           const lower = name.toLowerCase();
           if (Object.keys(this.item.requestHeader).some((k) => k.toLowerCase() === lower)) return;
-          if (target.readyState === 1) target.setRequestHeader(name, value);
+          if (target.readyState === 1) {
+            target.setRequestHeader(name, value);
+            this.item.sessionTokenSent = true;
+          }
         });
         return this.getSend(target);
       case "setRequestHeader":

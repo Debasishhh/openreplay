@@ -1,3 +1,5 @@
+import { obscureFormFields, obscureParam } from './sanitizers'
+
 export const genResponseByType = (
   responseType: XMLHttpRequest['responseType'],
   response: any,
@@ -73,8 +75,8 @@ export const genStringBody = (body?: BodyInit) => {
         // JSON may contain '&' in its values
         result = body
       } else {
-        // 'a=1&b=2' => try to parse as query
-        const arr = body.split('&')
+        // 'a=1&b=2' => try to parse as query; masked here, filterBody can't split 'a=1,b=2' safely
+        const arr = obscureFormFields(body).split('&')
         if (arr.length === 1) {
           // not a query, parse as original string
           result = body
@@ -87,7 +89,7 @@ export const genStringBody = (body?: BodyInit) => {
       // FormData or URLSearchParams or Array
       const arr = []
       for (const [key, value] of <FormData | URLSearchParams>body) {
-        arr.push(`${key}=${typeof value === 'string' ? value : '[object Object]'}`)
+        arr.push(`${key}=${typeof value === 'string' ? obscureParam(key, value) : '[object Object]'}`)
       }
       result = arr.join(',')
     } else if (
