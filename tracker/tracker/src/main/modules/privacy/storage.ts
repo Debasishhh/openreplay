@@ -60,10 +60,13 @@ export class PolicyStorage implements Storage {
     this.ownKeys.forEach((k) => this.removeItem(k))
   }
   getItem(key: string) {
+    // a failed real write (quota, Safari private mode) leaves the value in memory
+    const kept = this.memory.getItem(key)
+    if (kept !== null) return kept
     try {
       return this.target.getItem(key)
     } catch {
-      return this.memory.getItem(key)
+      return null
     }
   }
   key(index: number) {
@@ -82,6 +85,7 @@ export class PolicyStorage implements Storage {
     this.ownKeys.add(key)
     try {
       this.target.setItem(key, value)
+      if (this.target !== this.memory) this.memory.removeItem(key)
     } catch {
       this.memory.setItem(key, value)
     }
@@ -99,8 +103,15 @@ export class PolicyStorage implements Storage {
     }
     try {
       if (nextAllowed) {
-        this.memory.entries().forEach(([k, v]) => this.real!.setItem(k, v))
-        this.memory.clear()
+        // a key that fails to move stays readable from memory
+        this.memory.entries().forEach(([k, v]) => {
+          try {
+            this.real!.setItem(k, v)
+            this.memory.removeItem(k)
+          } catch {
+            // quota: keep it in memory
+          }
+        })
       } else {
         this.ownKeys.forEach((k) => {
           const v = this.real!.getItem(k)

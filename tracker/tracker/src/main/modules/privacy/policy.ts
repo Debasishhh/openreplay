@@ -79,13 +79,15 @@ function effective(
   return value
 }
 
+const signalOptOut = (s: Signals, o: PolicyOptions) => (o.respectGPC && s.gpc) || (o.respectDNT && s.dnt)
+
 /** Pure mapping from consent + signals to a policy. */
 export function resolvePolicy(
   input: PolicyInput,
   opts: PolicyOptions,
   explicit: { recording: boolean; storage: boolean } = { recording: false, storage: false },
 ): Policy {
-  const optedOut = (opts.respectGPC && input.signals.gpc) || (opts.respectDNT && input.signals.dnt)
+  const optedOut = signalOptOut(input.signals, opts)
   const recording = effective(input.consent.recording, optedOut, explicit.recording, opts)
   const storage = effective(input.consent.storage, optedOut, explicit.storage, opts)
 
@@ -108,7 +110,9 @@ export function resolvePolicy(
 }
 
 export function isPending(input: PolicyInput, opts: PolicyOptions): boolean {
-  return opts.mode === 'optIn' && input.consent.recording === 'pending'
+  if (opts.mode !== 'optIn' || input.consent.recording !== 'pending') return false
+  // an opt-out signal that page consent can't override is already the decision
+  return !(signalOptOut(input.signals, opts) && !opts.consentOverridesSignals)
 }
 
 export function samePolicy(a: Policy, b: Policy): boolean {

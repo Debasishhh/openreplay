@@ -13,10 +13,10 @@ custom rule. The tracker only asks it questions at a handful of existing choke p
 | file | contents |
 |---|---|
 | `policy.ts` | types + `resolvePolicy()`: pure mapping from consent + signals to a `Policy` |
-| `storage.ts` | `PolicyStorage`: drop-in `Storage` that is in-memory until storage consent exists |
+| `storage.ts` | `PolicyStorage`: drop-in `Storage` that is in-memory while the policy doesn't allow storage |
 | `signals.ts` | GPC / DNT reading, Google Consent Mode (`dataLayer`) watcher |
 | `index.ts` | `PrivacyManager`: state, `setConsent`, `onChange`, `ready()`, storage factory, user id hashing |
-| `../../../tests/privacy.unit.test.ts` | 25 tests |
+| `../../../tests/privacy.unit.test.ts` | unit tests |
 
 ## Concepts
 

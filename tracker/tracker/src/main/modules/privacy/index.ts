@@ -130,7 +130,7 @@ export default class PrivacyManager {
     }
     if (samePolicy(prev, this.policy)) {
       // e.g. optIn pending -> denied: nothing changes, but legacy keys can go now
-      if (decided) this.purgeDisallowed()
+      if (decided || consent.storage === 'denied') this.purgeDisallowed()
       return this.policy
     }
 
@@ -174,7 +174,7 @@ export default class PrivacyManager {
     const storage = new PolicyStorage(kind, target ?? null, this.policy)
     this.storages.push(storage)
     // while optIn is pending a returning visitor's consent may still arrive, so keep keys until then
-    if (!this.isPending()) this.purgeDisallowed([storage])
+    if (!this.isPending() || this.consent.storage === 'denied') this.purgeDisallowed([storage])
     return storage
   }
 
