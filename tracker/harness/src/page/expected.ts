@@ -48,7 +48,60 @@ function maskEmails(data: string) {
   })
 }
 
-export function expectedTree(opts: { captureClosed?: boolean; closed?: WeakMap<Element, ShadowRoot> } = {}) {
+const PLACEHOLDER_SRC = 'https://static.openreplay.com/tracker/placeholder.jpeg'
+
+function resolveURL(url: string) {
+  url = url.trim()
+  if (/^(\/\/|https?:\/\/|data:)/.test(url)) return url
+  try {
+    return new URL(url, document.baseURI).href
+  } catch (e) {
+    return url
+  }
+}
+
+const resolveSrcset = (srcset: string) =>
+  srcset
+    .split(srcset.match(/,\s+/) ? /,\s+/ : ',')
+    .map((c) => {
+      const [url, ...descriptors] = c.trim().split(/\s+/)
+      return [resolveURL(url), ...descriptors].join(' ')
+    })
+    .join(', ')
+
+// Full tracker only: the img module sends the src/srcset the observer skips.
+function imgModuleAttrs(el: Element, lvl: SanitizeLevel, parentLvl: SanitizeLevel, san: Sanitizer) {
+  const out: [string, string][] = []
+  if (el.localName === 'source') {
+    const picture = el.parentElement
+    const srcset = (el as HTMLSourceElement).srcset
+    if (!picture || picture.localName !== 'picture' || !srcset || lvl >= SanitizeLevel.Obscured) return out
+    // <source> follows the masking of its <picture>'s <img>
+    const img = Array.from(picture.children).find((c) => c.localName === 'img')
+    if (img && san.computeLevel(img, parentLvl) >= SanitizeLevel.Obscured) return out
+    out.push(['srcset', resolveSrcset(srcset)])
+    return out
+  }
+  if (el.localName !== 'img') return out
+  const img = el as HTMLImageElement
+  if (!img.getAttribute('src') && !img.getAttribute('srcset')) return out
+  // broken: reported as a failed resource, no src
+  if (img.complete && img.naturalWidth === 0 && img.naturalHeight === 0) return out
+  if (lvl >= SanitizeLevel.Obscured) {
+    const { width, height } = img.getBoundingClientRect()
+    out.push(['src', PLACEHOLDER_SRC])
+    if (!img.hasAttribute('width')) out.push(['width', String(width)])
+    if (!img.hasAttribute('height')) out.push(['height', String(height)])
+    return out
+  }
+  if (img.getAttribute('src')) out.push(['src', img.src])
+  if (img.srcset) out.push(['srcset', resolveSrcset(img.srcset)])
+  return out
+}
+
+export function expectedTree(
+  opts: { captureClosed?: boolean; closed?: WeakMap<Element, ShadowRoot>; imgModule?: boolean } = {},
+) {
   const san = new Sanitizer({ app: null as any, options: { obscureTextEmails: true } })
 
   const kids = (parent: Node, lvl: SanitizeLevel): string => {
@@ -68,10 +121,16 @@ export function expectedTree(opts: { captureClosed?: boolean; closed?: WeakMap<E
     }
     const el = n as Element
     const hidden = lvl === SanitizeLevel.Hidden
-    return element(el, lvl, hidden)
+    return element(el, lvl, hidden, false, opts.imgModule ? imgModuleAttrs(el, lvl, parentLvl, san) : [])
   }
 
-  const element = (live: Element, lvl: SanitizeLevel, hidden: boolean, topHtml = false): string => {
+  const element = (
+    live: Element,
+    lvl: SanitizeLevel,
+    hidden: boolean,
+    topHtml = false,
+    extra: [string, string][] = [],
+  ): string => {
     let el = live
     if (hidden) {
       const w = el.clientWidth
@@ -88,6 +147,7 @@ export function expectedTree(opts: { captureClosed?: boolean; closed?: WeakMap<E
       const r = attr(el, a.nodeName, a.value)
       if (r) list.push(r)
     }
+    list.push(...extra)
     const attrs = list
       .filter(([k]) => !k.startsWith('__openreplay') && k !== 'orloaded')
       .sort(([a], [b]) => (a < b ? -1 : 1))

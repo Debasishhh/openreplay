@@ -85,7 +85,7 @@ export async function buildFeatures(workspace, outDir) {
 /** The real player (mcp_app ReplayEngine over player/src), window.replay(tuples). */
 export async function buildReplay(outDir) {
   if (!fs.existsSync(path.join(REPO, 'player/node_modules'))) {
-    throw new Error('player dependencies are missing: run `yarn` in player/ (needed for --replay and e2e)')
+    throw new Error('player dependencies are missing: run `bun install` in player/ (needed for --replay and e2e)')
   }
   await esbuild.build({
     bundle: true,

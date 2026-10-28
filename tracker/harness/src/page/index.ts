@@ -181,8 +181,8 @@ const H = {
     }
     return out
   },
-  expected() {
-    return expectedTree()
+  expected(opts?: { imgModule?: boolean }) {
+    return expectedTree(opts)
   },
   mirrorSer() {
     return H.mirrorAll().serialize()

@@ -4,9 +4,10 @@ Runs the tracker in headless Chromium and checks what it records: against the li
 through the real player, and side by side with any other git ref.
 
 ```sh
-cd tracker && bun install            # once: harness deps come with the workspace
-cd harness && bun run install-browser # once: Chromium for playwright-core
-(cd ../../player && yarn)             # once: only for --replay and e2e (real player)
+cd tracker && bun install             # once: tracker deps (the harness builds the tracker)
+cd harness && bun install             # once: harness deps (own lockfile, not a workspace member)
+bun run install-browser               # once: Chromium for playwright-core
+(cd ../../player && bun install)      # once: only for --replay and e2e (real player)
 
 node cli.mjs core --replay            # DOM-core correctness, replayed by the player
 node cli.mjs perf --baseline=dev      # this checkout vs dev, same scenarios
@@ -86,6 +87,10 @@ this checkout or at the baseline worktree.
 `src/page/expected.ts` is the oracle: it serializes the live DOM the way a correct
 tracker and player pair should reproduce it, privacy rules included. It keeps its own copies
 of the rules on purpose; change it only when the intended behavior changes.
+Full-tracker suites call it with `imgModule: true`: there the img module adds `<img>` and
+`<picture> <source>` src/srcset, which the DOM core alone never sends.
+
+The harness is dev tooling: it is not a workspace member and CI skips `tracker/harness/**`.
 
 ## Known failures
 

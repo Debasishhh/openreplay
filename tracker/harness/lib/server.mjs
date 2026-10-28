@@ -12,7 +12,7 @@ export const REPLAY_HTML =
   '<!doctype html><html><head><link rel="stylesheet" href="/replay.css"></head><body>' +
   '<div id="host" style="width:1200px;height:800px;position:relative"></div><script src="/replay.js"></script></body></html>'
 
-const GIF = Buffer.from('R0lGODlhAQABAAAAACw=', 'base64')
+const GIF = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64')
 // assets scenarios reference by made-up paths: empty stylesheet, 1px image
 const fixture = (url) =>
   url.endsWith('.css')

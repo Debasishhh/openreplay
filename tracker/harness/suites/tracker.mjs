@@ -82,7 +82,7 @@ async function runScenario(browser, base, col, name, collect) {
         }
         await tick(400)
         const out = { started: started?.success ?? !!started, msgs: window.__msgs.length }
-        if (collect === 'tree') Object.assign(out, { tuples: window.__msgs, want: window.H.expected() })
+        if (collect === 'tree') Object.assign(out, { tuples: window.__msgs, want: window.H.expected({ imgModule: true }) })
         if (collect === 'bytes') out.sizes = window.H.sizesByType(window.__msgs)
         return out
       },
@@ -270,7 +270,7 @@ async function leaks(browser, base, ctx, args) {
             for (let i = 0; i < 200; i++) {
               const card = document.createElement('div')
               const img = document.createElement('img')
-              img.src = 'data:image/gif;base64,R0lGODlhAQABAAAAACw='
+              img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=='
               card.append(img, document.createElement('input'))
               const host = document.createElement('x-card')
               host.attachShadow({ mode: 'open' }).innerHTML = '<p>shadow</p><b>x</b>'
