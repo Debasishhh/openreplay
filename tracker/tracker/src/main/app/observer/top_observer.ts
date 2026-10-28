@@ -150,7 +150,9 @@ export default class TopObserver extends Observer {
       if (
         hasTag(node, 'iframe') &&
         ((this.options.captureIFrames && !hasOpenreplayAttribute(node, 'obscured')) ||
-          hasOpenreplayAttribute(node, 'capture'))
+          hasOpenreplayAttribute(node, 'capture')) &&
+        // a hidden iframe (or one under a hidden ancestor) is a placeholder: skip its document
+        !this.app.sanitizer.isHidden(this.app.nodes.getID(node) ?? -1)
       ) {
         this.handleIframe(node)
       }
