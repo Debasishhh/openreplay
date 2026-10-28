@@ -198,6 +198,8 @@ export default function (app: App, opts: Partial<Options>): void {
   })
 
   function trackInputValue(id: number, node: TextFieldElement) {
+    // a field can be switched to password and back before its value changes
+    if (node.type === 'password') passwordFields.add(node)
     if (inputValues.get(id) === node.value) {
       return
     }

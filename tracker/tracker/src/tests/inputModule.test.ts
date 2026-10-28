@@ -251,10 +251,23 @@ describe('input module: password fields', () => {
     el.value = 'secret2'
     h.tick()
     const sent = h.sent(Type.SetInputValue)
-    expect(sent.length).toBeGreaterThan(0)
+    expect(sent).toHaveLength(2)
     for (const m of sent) {
       expect(m[2]).toBe('')
       expect(m[3]).toBe(-1)
     }
+  })
+
+  test('stay hidden after password -> text with no value change in between', () => {
+    const h = createApp()
+    setupInput(h.app as any, { defaultInputMode: InputMode.Plain })
+    const el = input('text')
+    h.add(el)
+    el.type = 'password'
+    h.tick()
+    el.type = 'text'
+    el.value = 'hunter2'
+    h.tick()
+    expect(h.sent(Type.SetInputValue).at(-1)).toEqual([Type.SetInputValue, h.app.nodes.getID(el), '', -1])
   })
 })

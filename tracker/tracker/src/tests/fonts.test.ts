@@ -55,6 +55,18 @@ describe('fonts module', () => {
     expect(ff.family).toBe('MyFont')
   })
 
+  test('resolves uppercase url() and quoted urls holding parens or quotes', () => {
+    new (window as any).FontFace('Forms', `URL(up.woff2), url("font(1).woff2"), url("it's.woff2") format("woff2")`)
+    expect(app.send).toHaveBeenCalledWith(
+      LoadFontFace(
+        0,
+        'Forms',
+        'url("http://localhost/up.woff2"), url("http://localhost/font(1).woff2"), url("http://localhost/it\'s.woff2") format("woff2")',
+        '',
+      ),
+    )
+  })
+
   test('does not send for binary sources', () => {
     const ff = new (window as any).FontFace('Bin', new ArrayBuffer(4))
     expect(app.send).not.toHaveBeenCalled()

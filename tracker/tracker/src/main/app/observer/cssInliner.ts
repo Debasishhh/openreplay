@@ -104,6 +104,8 @@ export function inlineRemoteCss(
     let inString = false;
     let stringChar = '';
     let braceLevel = 0;
+    // unquoted url(...) may hold ';' (e.g. Google Fonts `wght@400;700`)
+    let parenLevel = 0;
     let currentRule = '';
 
     for (let i = 0; i < cssText.length; i++) {
@@ -144,7 +146,11 @@ export function inlineRemoteCss(
 
       currentRule += char;
 
-      if (char === '{') {
+      if (char === '(') {
+        parenLevel++;
+      } else if (char === ')') {
+        parenLevel--;
+      } else if (char === '{') {
         braceLevel++;
       } else if (char === '}') {
         braceLevel--;
@@ -153,11 +159,13 @@ export function inlineRemoteCss(
           // End of a top-level rule
           rules.push(currentRule.trim());
           currentRule = '';
+          parenLevel = 0;
         }
-      } else if (char === ';' && braceLevel === 0) {
+      } else if (char === ';' && braceLevel === 0 && parenLevel <= 0) {
         // brace-less statement (@layer a, b; @import ...; @namespace ...;)
         rules.push(currentRule.trim());
         currentRule = '';
+        parenLevel = 0;
       }
     }
 

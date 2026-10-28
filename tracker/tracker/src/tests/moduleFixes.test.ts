@@ -90,6 +90,14 @@ describe('selection', () => {
     expect(select(i.firstChild!, 0, d, 2)).toBe('plain')
     expect(select(i.firstChild!, 0, d, 3)).not.toContain('y')
   })
+
+  test('the range walk does not trust a page-patched childNodes (LWC synthetic shadow)', () => {
+    const { select } = setup('<div id="h"><span class="m">secret</span></div><p id="c">after</p>', ['.m'])
+    const host = document.getElementById('h')!
+    Object.defineProperty(host, 'childNodes', { get: () => [] })
+    const after = document.querySelector('#c')!.firstChild!
+    expect(select(host, 0, after, 3)).not.toContain('secret')
+  })
 })
 
 describe('img', () => {

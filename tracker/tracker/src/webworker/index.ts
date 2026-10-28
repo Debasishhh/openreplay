@@ -91,8 +91,9 @@ function initiateRestart(): void {
   if ([WorkerStatus.Stopped, WorkerStatus.Stopping].includes(workerStatus)) return
   postMessage('a_stop')
   // eslint-disable-next-line
-  reset().then(() => {
-    postMessage('a_start')
+  reset().then((current) => {
+    // a start/reset during the reset owns the session now: restarting would resurrect a stopped tracker
+    if (current) postMessage('a_start')
   })
 }
 

@@ -6,7 +6,8 @@ type FFData = [string, string, string]
 
 // the player builds the FontFace in its own document, so relative sources must be resolved here
 function absoluteSources(source: string, base: string): string {
-  return source.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, (match, _q, url: string) => {
+  // case-insensitive; a quoted url runs to its closing quote, so it may hold parens or the other quote
+  return source.replace(/url\(\s*(['"]?)([\s\S]+?)\1\s*\)/gi, (match, _q, url: string) => {
     if (url.startsWith('data:')) return match
     try {
       return `url("${new URL(url, base).href}")`

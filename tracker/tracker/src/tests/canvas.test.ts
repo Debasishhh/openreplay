@@ -218,5 +218,21 @@ describe('CanvasRecorder', () => {
       expect(Object.prototype.hasOwnProperty.call(gl, 'drawArrays')).toBe(false)
       canvas.remove()
     })
+
+    test("stopping puts back the page's own draw methods instead of deleting them", () => {
+      jest.useFakeTimers({ doNotFake: ['queueMicrotask'] })
+      const { canvas, gl } = glCanvas(false)
+      // e.g. Pixi/Babylon attach an ANGLE_instanced_arrays polyfill to the WebGL1 context
+      const instanced = function () {}
+      ;(gl as any).drawArraysInstanced = instanced
+      canvasRecorder.recordCanvas(canvas, 1)
+      jest.advanceTimersByTime(100)
+      expect((gl as any).drawArraysInstanced).not.toBe(instanced)
+
+      canvasRecorder.clear()
+      expect((gl as any).drawArraysInstanced).toBe(instanced)
+      expect(Object.prototype.hasOwnProperty.call(gl, 'drawArrays')).toBe(false)
+      canvas.remove()
+    })
   })
 })

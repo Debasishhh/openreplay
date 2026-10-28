@@ -12,6 +12,13 @@ function following(n: Node): Node | null {
   return null
 }
 
+/** `n.childNodes[offset]` without the page-patchable `childNodes` (e.g. LWC synthetic shadow) */
+function childAt(n: Node, offset: number): Node | null {
+  let c = firstChild(n)
+  for (let i = 0; c !== null && i < offset; i++) c = nextSibling(c)
+  return c
+}
+
 function isCharacterData(n: Node) {
   return n.nodeType === Node.TEXT_NODE || n.nodeType === Node.CDATA_SECTION_NODE || n.nodeType === Node.COMMENT_NODE
 }
@@ -20,8 +27,8 @@ function isCharacterData(n: Node) {
 function rangeHasMasked(app: App, range: Range): boolean {
   const sc = range.startContainer
   const ec = range.endContainer
-  let n: Node | null = isCharacterData(sc) ? sc : (sc.childNodes[range.startOffset] ?? following(sc))
-  const stop = isCharacterData(ec) ? following(ec) : (ec.childNodes[range.endOffset] ?? following(ec))
+  let n: Node | null = isCharacterData(sc) ? sc : (childAt(sc, range.startOffset) ?? following(sc))
+  const stop = isCharacterData(ec) ? following(ec) : (childAt(ec, range.endOffset) ?? following(ec))
   while (n !== null && n !== stop) {
     if (n.nodeType === Node.ELEMENT_NODE) {
       const id = app.nodes.getID(n)

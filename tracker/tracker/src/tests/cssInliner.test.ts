@@ -251,5 +251,19 @@ describe('inlineRemoteCss', () => {
     await flush();
     expect(mockAdoptedSSInsertRuleURLBased).toHaveBeenCalledWith(123, '@layer theme, base;', 0, 'http://example.com');
     expect(mockAdoptedSSInsertRuleURLBased).toHaveBeenCalledWith(123, 'body { color: red; }', 1, 'http://example.com');
+    expect(mockAdoptedSSInsertRuleURLBased).toHaveBeenCalledTimes(2);
+  });
+
+  test('keeps ; inside an unquoted url() of an @import', async () => {
+    const imp = '@import url(https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap);';
+    mockNode.href = 'http://example.com/style.css';
+    globalThis.fetch.mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(imp + '\nbody { color: red; }'),
+    });
+    inlineRemoteCss(mockNode, 456, 'http://example.com', mockNextID, mockAdoptedSSInsertRuleURLBased, mockAdoptedSSAddOwner);
+    await flush();
+    expect(mockAdoptedSSInsertRuleURLBased).toHaveBeenCalledWith(123, imp, 0, 'http://example.com');
+    expect(mockAdoptedSSInsertRuleURLBased).toHaveBeenCalledTimes(2);
   });
 });

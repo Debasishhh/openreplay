@@ -51,13 +51,17 @@ export function watchCanvasContexts(context: typeof globalThis = window) {
 interface DrawHook {
   /** wraps the draw calls until the next one, which captures */
   arm(): void
+  /** puts back what the context had: the page's own methods (e.g. instancing polyfills) or the prototype's */
+  unhook(): void
 }
 
 function hookDraws(gl: GLContext, capture: () => void): DrawHook {
   const natives: Array<[string, Function]> = []
+  const pageOwn = new Set<string>()
   for (const name of DRAW_CALLS) {
     const native = (gl as any)[name]
     if (typeof native === 'function') natives.push([name, native])
+    if (Object.prototype.hasOwnProperty.call(gl, name)) pageOwn.add(name)
   }
   let armed = false
   // own properties on this context only; reassigned rather than deleted between frames,
@@ -84,14 +88,13 @@ function hookDraws(gl: GLContext, capture: () => void): DrawHook {
       armed = true
       set(wrappers)
     },
-  }
-}
-
-function unhookDraws(gl: GLContext) {
-  for (const name of DRAW_CALLS) {
-    if (Object.prototype.hasOwnProperty.call(gl, name)) {
-      delete (gl as any)[name]
-    }
+    unhook() {
+      armed = false
+      for (const [name, native] of natives) {
+        if (pageOwn.has(name)) (gl as any)[name] = native
+        else delete (gl as any)[name]
+      }
+    },
   }
 }
 
@@ -116,7 +119,7 @@ class CanvasRecorder {
   private snapshots: Record<number, CanvasSnapshot> = {}
   private readonly intervals: Map<number, ReturnType<typeof setInterval>> = new Map()
   private readonly observers: Map<number, IntersectionObserver> = new Map()
-  private readonly drawHooks: Map<number, { gl: GLContext; hook: DrawHook }> = new Map()
+  private readonly drawHooks: Map<number, DrawHook> = new Map()
   private readonly interval: number
   private readonly fileExt: 'webp' | 'png' | 'jpeg' | 'avif'
   private uploadQueue = 0
@@ -252,8 +255,8 @@ class CanvasRecorder {
       gl && !gl.getContextAttributes()?.preserveDrawingBuffer
         ? hookDraws(gl, () => captureFn(cachedCanvas))
         : null
-    if (gl && drawHook) {
-      this.drawHooks.set(id, { gl, hook: drawHook })
+    if (drawHook) {
+      this.drawHooks.set(id, drawHook)
     }
 
     const int = setInterval(() => {
@@ -413,7 +416,7 @@ class CanvasRecorder {
 
     const drawHook = this.drawHooks.get(id)
     if (drawHook) {
-      unhookDraws(drawHook.gl)
+      drawHook.unhook()
       this.drawHooks.delete(id)
     }
 
