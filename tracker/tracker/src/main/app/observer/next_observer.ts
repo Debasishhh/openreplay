@@ -330,7 +330,7 @@ export default class NextObserver
       if (pr !== undefined) this.nodes.kill(pr)
     }
     this.frameDocs.set(iframe, doc)
-    const r = this.newRec(doc, host, SanitizeLevel.Plain)
+    const r = this.newRec(doc, host, host.lvl)
     this.app.send(CreateIFrameDocument(host.id, r.id))
     this.mo.observe(doc, MO_OPTS)
     this.listen(doc, 'load', this.onLoad)
@@ -365,7 +365,7 @@ export default class NextObserver
     if (!this.active || slot.localName !== 'slot') return
     const sr = this.nodes.live(slot)
     if (sr === undefined) return
-    for (const n of slot.assignedNodes({ flatten: true })) {
+    for (const n of slot.assignedNodes()) {
       const r = this.nodes.live(n)
       if (r !== undefined && r.slot !== sr.id) {
         r.slot = sr.id
@@ -446,6 +446,8 @@ export default class NextObserver
     }
     this.removeDetached()
     this.parkStale()
+    // before placement: children added under a node masked in the same batch inherit the new level
+    this.raiseLevels()
     this.place()
     this.flushUpdates()
     this.finish(false)
@@ -762,19 +764,21 @@ export default class NextObserver
     }
   }
 
-  private flushUpdates() {
-    const batch = this.batch
-    // levels are raised after placement; a node raised to hidden is rebuilt, placed again
-    this.pend.length = 0
-    let rebuilt = false
+  // a node raised to hidden is queued for a rebuild, which the following place() does
+  private raiseLevels() {
     const checkAll = this.app.sanitizer.hasDomSanitizer
     for (const [n, names] of this.attrs) {
       if (!checkAll && !hasPrivacyAttr(names)) continue
       const r = this.nodes.live(n)
-      if (r === undefined || (r.b === batch && r.f & FRESH) || n.nodeType !== ELEMENT) continue
-      if (this.raiseLevel(n, r, r.p?.lvl ?? SanitizeLevel.Plain)) rebuilt = true
+      // fresh nodes have no live record yet: placement computes their level
+      if (r === undefined || n.nodeType !== ELEMENT) continue
+      this.raiseLevel(n, r, r.p?.lvl ?? SanitizeLevel.Plain)
     }
-    if (rebuilt) this.place()
+  }
+
+  private flushUpdates() {
+    const batch = this.batch
+    this.pend.length = 0
     for (const [n, names] of this.attrs) {
       const r = this.nodes.live(n)
       if (r === undefined || (r.b === batch && r.f & FRESH) || n.nodeType !== ELEMENT) continue

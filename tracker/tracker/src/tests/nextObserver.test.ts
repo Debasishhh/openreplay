@@ -233,6 +233,24 @@ describe('NextObserver mutations', () => {
 })
 
 describe('NextObserver privacy', () => {
+  const allData = () => ofType(Type.SetNodeData).map((m) => m[2]).join('|')
+
+  test('iframe content inherits a masked ancestor', () => {
+    setup('<div data-openreplay-obscured><iframe id="f"></iframe></div>')
+    ;($('#f') as HTMLIFrameElement).contentDocument!.body.innerHTML = '<p>card 4111</p>'
+    observer.observe()
+    expect(ofType(Type.CreateIFrameDocument)).toHaveLength(1)
+    expect(allData()).toContain('****')
+    expect(allData()).not.toContain('4111')
+  })
+
+  test('iframe content inherits its own mask', () => {
+    setup('<iframe id="f" data-openreplay-obscured data-openreplay-capture></iframe>')
+    ;($('#f') as HTMLIFrameElement).contentDocument!.body.innerHTML = '<p>card 4111</p>'
+    observer.observe()
+    expect(allData()).not.toContain('4111')
+  })
+
   test('moving a node into a hidden container removes it player-side', async () => {
     setup('<div id="h" data-openreplay-hidden></div><p id="m">visible</p>')
     observer.observe()
@@ -289,6 +307,35 @@ describe('NextObserver privacy', () => {
 
 describe('NextObserver privacy changes after insertion', () => {
   const data = (id: number) => ofType(Type.SetNodeData).filter((m) => m[1] === id).map((m) => m[2])
+  const allData = () => ofType(Type.SetNodeData).map((m) => m[2]).join('|')
+
+  test('text added in the same turn as an ancestor mask is never sent plain', async () => {
+    setup('<div id="d"><p id="p"></p></div>')
+    observer.observe()
+    $('#p').append('card 4111')
+    $('#d').setAttribute('data-openreplay-obscured', '')
+    await flush()
+    expect(allData()).not.toContain('4111')
+    observer.disconnect()
+    nodes.clear()
+
+    setup('<div id="d"><p id="p"></p></div>')
+    observer.observe()
+    $('#d').setAttribute('data-openreplay-obscured', '')
+    $('#p').append('card 4111')
+    await flush()
+    expect(allData()).not.toContain('4111')
+  })
+
+  test('text added in the same turn as an ancestor is hidden is never sent', async () => {
+    setup('<div id="d"><p id="p"></p></div>')
+    observer.observe()
+    $('#p').append('secret 4111')
+    $('#d').setAttribute('data-openreplay-hidden', '')
+    await flush()
+    expect(allData()).not.toContain('4111')
+    expect(mirror().errors).toEqual([])
+  })
 
   test('a mask attribute masks the text already sent and the text sent later', async () => {
     setup('<div id="d"><p>card 4111</p><input id="i"></div>')
@@ -488,6 +535,31 @@ describe('NextNodes listener cleanup', () => {
 })
 
 describe('NextObserver parity details', () => {
+  test('a forwarded slot keeps light nodes on the outer slot', async () => {
+    setup('')
+    class FwdInner extends HTMLElement {
+      constructor() {
+        super()
+        this.attachShadow({ mode: 'open' }).innerHTML = '<div><slot name="body"></slot></div>'
+      }
+    }
+    customElements.define('x-fwd-inner', FwdInner)
+    const outer = document.createElement('x-fwd-outer')
+    document.body.append(outer)
+    observer.observe()
+    const light = document.createElement('span')
+    light.textContent = 'light'
+    outer.append(light)
+    const sr = outer.attachShadow({ mode: 'open' })
+    sr.innerHTML = '<x-fwd-inner><slot slot="body"></slot></x-fwd-inner>'
+    await flush()
+    await flush()
+    const last = ofType(Type.SetNodeSlot)
+      .filter((m) => m[1] === nodes.getID(light))
+      .pop()
+    expect(last?.[2]).toBe(nodes.getID(sr.querySelector('slot')!))
+  })
+
   test('light children get their slot once the shadow root is recorded', () => {
     setup('')
     const host = document.createElement('x-slotted')

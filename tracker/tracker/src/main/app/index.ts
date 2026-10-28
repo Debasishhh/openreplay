@@ -382,7 +382,8 @@ export default class App {
       // ids are never reused, so a removed node's level would otherwise stay forever
       onUnregister: (id: number) => this.sanitizer.setLevel(id, SanitizeLevel.Plain),
     }
-    if (this.options.nextObserver) {
+    // the next core indexes nodes and listeners through WeakRef; without it, the default core
+    if (this.options.nextObserver && typeof WeakRef === 'function') {
       // same public surface as Nodes/TopObserver, see next_observer.ts
       this.nodes = new NextNodes(nodesOptions) as unknown as Nodes
       this.observer = new NextObserver({ app: this, options }) as unknown as Observer
