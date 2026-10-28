@@ -28,8 +28,13 @@ export default class IFrameOffsets {
 
   private listen(target: EventTarget, type: string) {
     target.addEventListener(type, this.bump)
-    const ref = typeof WeakRef === 'function' ? new WeakRef(target) : { deref: () => target }
-    this.listeners.push({ ref, type })
+    if (typeof WeakRef === 'function') {
+      this.listeners = this.listeners.filter((l) => l.ref.deref() !== undefined)
+      this.listeners.push({ ref: new WeakRef(target), type })
+    } else if (target === document || target === window) {
+      this.listeners.push({ ref: { deref: () => target }, type })
+    }
+    // no WeakRef: a frame keeps its listener (it only bumps a counter) rather than being retained
   }
 
   observe(iframe: HTMLIFrameElement) {

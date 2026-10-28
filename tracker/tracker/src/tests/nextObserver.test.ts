@@ -337,6 +337,47 @@ describe('NextObserver privacy changes after insertion', () => {
     expect(mirror().errors).toEqual([])
   })
 
+  test('a moved child hidden in the same turn keeps its siblings in order', async () => {
+    setup('<div id="p"><a></a><b></b><i id="x">secret</i></div>')
+    observer.observe()
+    const x = $('#x')
+    $('#p').append(document.createElement('s'))
+    $('#p').append(x)
+    x.setAttribute('data-openreplay-hidden', '')
+    await flush()
+    const m = mirror()
+    expect(m.errors).toEqual([])
+    expect(m.html()).toContain('<div><a></a><b></b><s></s><i></i></div>')
+  })
+
+  test('masking an iframe ancestor masks the iframe content, by attribute and by resanitize', async () => {
+    setup('<div id="w"><iframe id="f"></iframe></div>')
+    const doc = ($('#f') as HTMLIFrameElement).contentDocument!
+    doc.body.innerHTML = '<p>card 4111</p>'
+    observer.observe()
+    const text = doc.querySelector('p')!.firstChild as Text
+    $('#w').setAttribute('data-openreplay-obscured', '')
+    await flush()
+    expect(data(nodes.getID(text)).pop()).not.toContain('4111')
+    text.data = 'card 5500'
+    await flush()
+    expect(data(nodes.getID(text)).pop()).not.toContain('5500')
+    observer.disconnect()
+    nodes.clear()
+
+    let mask = false
+    setup('<div id="w"><iframe id="f"></iframe></div>', {}, {
+      domSanitizer: (el: Element) => (mask && el.id === 'w' ? SanitizeLevel.Obscured : SanitizeLevel.Plain),
+    })
+    const doc2 = ($('#f') as HTMLIFrameElement).contentDocument!
+    doc2.body.innerHTML = '<p>card 4111</p>'
+    observer.observe()
+    mask = true
+    observer.resanitizeSubtree($('#w'))
+    const text2 = doc2.querySelector('p')!.firstChild as Text
+    expect(data(nodes.getID(text2)).pop()).not.toContain('4111')
+  })
+
   test('a mask attribute masks the text already sent and the text sent later', async () => {
     setup('<div id="d"><p>card 4111</p><input id="i"></div>')
     observer.observe()

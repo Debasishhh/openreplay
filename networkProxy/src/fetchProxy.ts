@@ -137,7 +137,8 @@ export class FetchProxyHandler<T extends typeof fetch> implements ProxyHandler<T
         const init = argsList[1] || {};
         const headers = new Headers(init.headers);
         if (headers.has(name)) return;
-        if (init.headers instanceof Headers) {
+        // tag check: an iframe's fetch gets that realm's Headers
+        if (Object.prototype.toString.call(init.headers) === "[object Headers]") {
           headers.append(name, value);
           argsList[1] = { ...init, headers };
         } else if (Array.isArray(init.headers)) {

@@ -268,6 +268,28 @@ describe('PrivacyManager', () => {
     expect(s.getItem('uuid')).toBe('u1')
   })
 
+  test('values kept in memory after a failed real write are enumerable, once each', () => {
+    const real = new FakeStorage()
+    real.setItem('stale', 'old')
+    const setItem = real.setItem.bind(real)
+    real.setItem = (k: string, v: string) => {
+      if (k === 'big' || k === 'stale') throw new Error('QuotaExceededError')
+      setItem(k, v)
+    }
+    const s = new PolicyStorage('local', real, {
+      record: 'full',
+      storage: 'persistent',
+      identity: 'raw',
+      networkPayloads: true,
+    })
+    s.setItem('uuid', 'u1')
+    s.setItem('big', 'x')
+    s.setItem('stale', 'new')
+    const keys = Array.from({ length: s.length }, (_, i) => s.key(i))
+    expect(keys.sort()).toEqual(['big', 'stale', 'uuid'])
+    expect(s.key(s.length)).toBeNull()
+  })
+
   test('optIn with an enforced GPC opt-out is decided: ready() resolves and listed keys go', async () => {
     const real = new FakeStorage()
     real.setItem('__openreplay_uuid', 'old')

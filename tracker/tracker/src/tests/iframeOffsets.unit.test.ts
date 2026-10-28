@@ -25,6 +25,8 @@ describe('IFrameOffsets', () => {
     offsets.clear()
     expect(removeDoc).toHaveBeenCalledWith('scroll', expect.any(Function))
     expect(removeWin).toHaveBeenCalledWith('resize', expect.any(Function))
+    removeDoc.mockRestore()
+    removeWin.mockRestore()
     iframe.remove()
   })
 })

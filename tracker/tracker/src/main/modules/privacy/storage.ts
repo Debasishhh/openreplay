@@ -53,8 +53,24 @@ export class PolicyStorage implements Storage {
     return this.allowed && this.real ? this.real : this.memory
   }
 
+  /** the target's keys, plus values kept in memory after a failed real write */
+  private keys(): string[] {
+    const keys: string[] = []
+    try {
+      for (let i = 0; i < this.target.length; i++) keys.push(this.target.key(i) as string)
+    } catch {
+      // storage can throw in private windows / sandboxed iframes
+    }
+    if (this.target !== this.memory) {
+      this.memory.entries().forEach(([k]) => {
+        if (!keys.includes(k)) keys.push(k)
+      })
+    }
+    return keys
+  }
+
   get length() {
-    return this.target.length
+    return this.keys().length
   }
   clear() {
     this.ownKeys.forEach((k) => this.removeItem(k))
@@ -70,7 +86,7 @@ export class PolicyStorage implements Storage {
     }
   }
   key(index: number) {
-    return this.target.key(index)
+    return this.keys()[index] ?? null
   }
   removeItem(key: string) {
     this.ownKeys.delete(key)

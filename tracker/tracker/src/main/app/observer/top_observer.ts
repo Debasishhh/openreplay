@@ -187,7 +187,8 @@ export default class TopObserver extends Observer {
     const handle = this.app.safe(() =>
       setTimeout(() => {
         const id = this.app.nodes.getID(iframe)
-        if (id === undefined || !canAccessIframe(iframe)) return
+        // also on a later load: the iframe may have been hidden since
+        if (id === undefined || this.app.sanitizer.isHidden(id) || !canAccessIframe(iframe)) return
         const currentWin = iframe.contentWindow
         const currentDoc = iframe.contentDocument
         if (!currentDoc) {
@@ -225,6 +226,20 @@ export default class TopObserver extends Observer {
     )
     iframe.addEventListener('load', handle)
     handle()
+  }
+
+  protected releaseFrame(iframe: HTMLIFrameElement): void {
+    const observer = this.iframeObservers.get(iframe)
+    if (!observer) return
+    observer.disconnect()
+    this.iframeObservers.delete(iframe)
+    this.iframeObserversArr = this.iframeObserversArr.filter((o) => o !== observer)
+    const doc = canAccessIframe(iframe) ? iframe.contentDocument : null
+    if (doc && this.docObservers.get(doc) === observer) {
+      this.docObservers.delete(doc)
+      // its nodes stop being polled or re-sent (inputs, nested iframes)
+      this.clearSubtreeRegistration(doc)
+    }
   }
 
   private shadowRootObservers: Map<ShadowRoot, ShadowRootObserver> = new Map()

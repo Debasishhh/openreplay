@@ -376,6 +376,27 @@ describe("session token header with tokenUrlMatcher", () => {
     expect(new Headers(target.mock.calls[1][1]!.headers).get("x-app")).toBe("1");
   });
 
+  it("fetch keeps the app's headers when its Headers object comes from another realm (iframe)", async () => {
+    class ForeignHeaders {
+      #h: Headers;
+      constructor(init: HeadersInit) {
+        this.#h = new Headers(init);
+      }
+      get [Symbol.toStringTag]() {
+        return "Headers";
+      }
+      [Symbol.iterator]() {
+        return this.#h[Symbol.iterator]();
+      }
+    }
+    const target = vi.fn((_input: any, _init?: RequestInit) => ok());
+    const wrapped = FetchProxy.create(false, token, identity, vi.fn(), () => false, undefined, target as any);
+    await wrapped("https://api.example.com/b", { headers: new ForeignHeaders({ Authorization: "Bearer app" }) as any });
+    const sent = new Headers(target.mock.calls[0][1]!.headers);
+    expect(sent.get("authorization")).toBe("Bearer app");
+    expect(sent.get("x-openreplay-sessiontoken")).toBe("t");
+  });
+
   it("fetch keeps a token the app set itself", async () => {
     const sendMessage = vi.fn();
     const target = vi.fn((_input: any, _init?: RequestInit) => ok());

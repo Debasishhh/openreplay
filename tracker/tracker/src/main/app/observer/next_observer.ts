@@ -849,6 +849,8 @@ export default class NextObserver
     if (node.nodeType === ELEMENT) {
       const sr = this.shadowOf(node as Element)
       if (sr) this.resanitizeNode(sr, newLevel)
+      const doc = this.frameDocs.get(node as Element)
+      if (doc) this.resanitizeNode(doc, newLevel)
     }
   }
 
@@ -871,12 +873,17 @@ export default class NextObserver
       const cr = this.nodes.live(c)
       if (cr !== undefined && this.raiseLevel(c, cr, lvl)) rebuilt = true
     }
-    const sr = node.nodeType === ELEMENT ? this.shadowOf(node as Element) : null
-    if (sr !== null) {
-      const srRec = this.nodes.live(sr)
-      if (srRec !== undefined && this.raiseLevel(sr, srRec, lvl)) rebuilt = true
+    if (node.nodeType === ELEMENT) {
+      if (this.raiseRoot(this.shadowOf(node as Element), lvl)) rebuilt = true
+      if (this.raiseRoot(this.frameDocs.get(node as Element), lvl)) rebuilt = true
     }
     return rebuilt
+  }
+
+  /** shadow root or iframe document of a raised host */
+  private raiseRoot(root: Node | null | undefined, lvl: SanitizeLevel): boolean {
+    const r = root ? this.nodes.live(root) : undefined
+    return r !== undefined && this.raiseLevel(root!, r, lvl)
   }
 
   private setLevel(r: Rec, node: Node, lvl: SanitizeLevel) {
@@ -895,6 +902,9 @@ export default class NextObserver
   private rebuild(r: Rec, node: Node) {
     const p = r.p as Rec
     this.app.send(RemoveNode(r.id))
+    // a moved child not placed yet: it no longer sits in its old parent either
+    if (r.b === this.batch && r.f & STALE) p.us--
+    r.f &= ~(MOVED | STALE)
     p.n--
     p.mut++
     this.nodes.kill(r)

@@ -1,4 +1,4 @@
-import { createMutationObserver, throttleWithTrailing } from '../../utils.js'
+import { createMutationObserver, throttleWithTrailing, canAccessIframe } from '../../utils.js'
 import {
   CreateDocument,
   RemoveNodeAttribute,
@@ -825,6 +825,15 @@ export default abstract class Observer {
     for (let child = firstChild(node); child !== null; child = nextSibling(child)) {
       this.resanitizeNode(child, newLevel)
     }
+    // a recorded iframe's document is observed separately and inherits the host level
+    const doc = hasTag(node, 'iframe') && canAccessIframe(node) ? node.contentDocument : null
+    const docId = doc ? this.app.nodes.getID(doc) : undefined
+    if (docId !== undefined) {
+      this.app.sanitizer.setLevel(docId, newLevel)
+      for (let child = firstChild(doc!); child !== null; child = nextSibling(child)) {
+        this.resanitizeNode(child, newLevel)
+      }
+    }
   }
 
   // Destroys the node player-side and re-emits its subtree from scratch (new ids)
@@ -840,8 +849,12 @@ export default abstract class Observer {
     this.commitNodes()
   }
 
-  private clearSubtreeRegistration(node: Node): void {
+  /** An iframe left the recording (rebuilt as hidden): the top observer stops recording its document. */
+  protected releaseFrame(_iframe: HTMLIFrameElement): void {}
+
+  protected clearSubtreeRegistration(node: Node): void {
     const clearOne = (n: Node) => {
+      if (hasTag(n, 'iframe')) this.releaseFrame(n)
       const oldId = this.app.nodes.getID(n)
       if (oldId !== undefined) {
         this.app.sanitizer.setLevel(oldId, SanitizeLevel.Plain)
